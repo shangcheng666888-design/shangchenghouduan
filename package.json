@@ -1,0 +1,31 @@
+{
+  "name": "shangcheng-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --import tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "migrate": "tsx scripts/runMigration.ts",
+    "setup-admin-totp": "tsx scripts/setupAdminTotp.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.98.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.3.1",
+    "express": "^4.21.0",
+    "multer": "^2.1.0",
+    "pg": "^8.19.0",
+    "speakeasy": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.18.0",
+    "tsx": "^4.19.2",
+    "typescript": "~5.9.3"
+  }
+}
