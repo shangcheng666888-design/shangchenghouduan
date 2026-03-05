@@ -31,7 +31,7 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')))
 
 app.use('/api/auth', authRouter)
 app.use('/api/admin', (req, res, next) => {
-  if (req.path.startsWith('/api/admin/auth')) return next()
+  if (req.path.startsWith('/auth')) return next()
   const auth = req.headers.authorization
   const token = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : null
   if (!token || !verifyAdminToken(token)) {
