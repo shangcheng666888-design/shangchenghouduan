@@ -131,7 +131,7 @@ usersRouter.post('/:id/recharge', async (req, res) => {
       res.status(404).json({ success: false, message: '用户不存在' })
       return
     }
-    const body = req.body as { amount?: number; tradePassword?: string; transactionNo?: string }
+    const body = req.body as { amount?: number; tradePassword?: string; rechargeScreenshotUrl?: string }
     const tradePassword = typeof body.tradePassword === 'string' ? body.tradePassword : ''
     if (!user.tradePassword) {
       res.status(400).json({ success: false, message: '请先设置交易密码' })
@@ -146,16 +146,16 @@ usersRouter.post('/:id/recharge', async (req, res) => {
       res.status(400).json({ success: false, message: '请填写正确金额' })
       return
     }
-    const transactionNo = typeof body.transactionNo === 'string' ? body.transactionNo.trim() : ''
-    if (!transactionNo) {
-      res.status(400).json({ success: false, message: '请填写交易号' })
+    const rechargeScreenshotUrl = typeof body.rechargeScreenshotUrl === 'string' ? body.rechargeScreenshotUrl.trim() : ''
+    if (!rechargeScreenshotUrl) {
+      res.status(400).json({ success: false, message: '请上传交易截图' })
       return
     }
     const { id } = await createFundApplication({
       userId: req.params.id,
       type: 'recharge',
       amount,
-      rechargeTxNo: transactionNo,
+      rechargeScreenshotUrl,
     })
     res.status(201).json({ success: true, applicationId: id, message: '已提交，请等待审核通过后到账' })
   } catch (e) {

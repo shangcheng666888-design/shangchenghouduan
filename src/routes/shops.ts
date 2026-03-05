@@ -463,10 +463,10 @@ shopsRouter.get('/:id/fund-applications', async (req, res) => {
 shopsRouter.post('/:id/recharge', async (req, res) => {
   try {
     const shopId = req.params.id
-    const body = req.body as { userId?: string; amount?: number; tradePassword?: string; transactionNo?: string }
+    const body = req.body as { userId?: string; amount?: number; tradePassword?: string; rechargeScreenshotUrl?: string }
     const userId = typeof body.userId === 'string' ? body.userId.trim() : ''
     const tradePassword = typeof body.tradePassword === 'string' ? body.tradePassword.trim() : ''
-    const transactionNo = typeof body.transactionNo === 'string' ? body.transactionNo.trim() : ''
+    const rechargeScreenshotUrl = typeof body.rechargeScreenshotUrl === 'string' ? body.rechargeScreenshotUrl.trim() : ''
     const amount = Number(body.amount)
 
     if (!userId) {
@@ -482,8 +482,8 @@ shopsRouter.post('/:id/recharge', async (req, res) => {
       res.status(400).json({ success: false, message: '请输入正确的金额' })
       return
     }
-    if (!transactionNo) {
-      res.status(400).json({ success: false, message: '请填写交易号' })
+    if (!rechargeScreenshotUrl) {
+      res.status(400).json({ success: false, message: '请上传交易截图' })
       return
     }
     // 使用店铺独立交易密码，而非用户个人交易密码
@@ -505,7 +505,7 @@ shopsRouter.post('/:id/recharge', async (req, res) => {
       shopId,
       type: 'recharge',
       amount,
-      rechargeTxNo: transactionNo,
+      rechargeScreenshotUrl,
     })
     res.status(201).json({ success: true, id })
   } catch (e) {

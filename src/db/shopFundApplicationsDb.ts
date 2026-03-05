@@ -12,6 +12,7 @@ export interface ShopFundApplicationRow {
   amount: string
   status: string
   recharge_tx_no: string | null
+  recharge_screenshot_url: string | null
   withdraw_address: string | null
   reviewed_at: string | null
   reviewer_id: string | null
@@ -41,6 +42,7 @@ function rowToApp(r: ShopFundApplicationRow) {
     reviewerId: r.reviewer_id,
     remark: r.remark,
     rechargeTxNo: r.recharge_tx_no,
+    rechargeScreenshotUrl: r.recharge_screenshot_url ?? null,
     withdrawAddress: r.withdraw_address,
     orderNo: type === 'recharge' ? `SRCH${pad8(r.id)}` : `SWD${pad8(r.id)}`,
   }
@@ -87,18 +89,20 @@ export async function createShopFundApplication(params: {
   type: ShopFundApplicationType
   amount: number
   rechargeTxNo?: string | null
+  rechargeScreenshotUrl?: string | null
   withdrawAddress?: string | null
 }): Promise<{ id: number }> {
   const pool = getPool()
   const res = await pool.query<{ id: number }>(
-    `INSERT INTO shop_fund_applications (shop_id, type, amount, status, recharge_tx_no, withdraw_address)
-     VALUES ($1, $2, $3, 'pending', $4, $5)
+    `INSERT INTO shop_fund_applications (shop_id, type, amount, status, recharge_tx_no, recharge_screenshot_url, withdraw_address)
+     VALUES ($1, $2, $3, 'pending', $4, $5, $6)
      RETURNING id`,
     [
       params.shopId,
       params.type,
       params.amount,
       params.rechargeTxNo ?? null,
+      params.type === 'recharge' ? (params.rechargeScreenshotUrl ?? null) : null,
       params.withdrawAddress ?? null,
     ]
   )
@@ -138,7 +142,7 @@ export async function listShopFundApplicationsByShop(opts: {
 
   const offset = (page - 1) * pageSize
   const listRes = await pool.query<ShopFundApplicationRow>(
-    `SELECT id, shop_id, type, amount::text AS amount, status, recharge_tx_no, withdraw_address, reviewed_at, reviewer_id, remark, created_at
+    `SELECT id, shop_id, type, amount::text AS amount, status, recharge_tx_no, recharge_screenshot_url, withdraw_address, reviewed_at, reviewer_id, remark, created_at
      FROM shop_fund_applications
      ${where}
      ORDER BY created_at DESC
@@ -210,6 +214,7 @@ export async function listShopFundApplicationsForAdmin(opts: {
         a.amount::text AS amount,
         a.status,
         a.recharge_tx_no,
+        a.recharge_screenshot_url,
         a.withdraw_address,
         a.reviewed_at,
         a.reviewer_id,

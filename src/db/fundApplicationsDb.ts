@@ -15,6 +15,7 @@ export interface FundApplicationRow {
   reviewer_id: string | null
   remark: string | null
   recharge_tx_no: string | null
+  recharge_screenshot_url: string | null
   withdraw_address: string | null
 }
 
@@ -40,6 +41,7 @@ function rowToApp(r: FundApplicationRow) {
     reviewerId: r.reviewer_id ?? null,
     remark: r.remark ?? null,
     rechargeTxNo: r.recharge_tx_no ?? null,
+    rechargeScreenshotUrl: r.recharge_screenshot_url ?? null,
     withdrawAddress: r.withdraw_address ?? null,
   }
 }
@@ -49,17 +51,19 @@ export async function createFundApplication(params: {
   type: FundApplicationType
   amount: number
   rechargeTxNo?: string | null
+  rechargeScreenshotUrl?: string | null
   withdrawAddress?: string | null
 }): Promise<{ id: number }> {
   const pool = getPool()
   const res = await pool.query<{ id: string }>(
-    `INSERT INTO user_fund_applications (user_id, type, amount, status, recharge_tx_no, withdraw_address)
-     VALUES ($1, $2, $3, 'pending', $4, $5) RETURNING id`,
+    `INSERT INTO user_fund_applications (user_id, type, amount, status, recharge_tx_no, recharge_screenshot_url, withdraw_address)
+     VALUES ($1, $2, $3, 'pending', $4, $5, $6) RETURNING id`,
     [
       params.userId,
       params.type,
       params.amount,
       params.type === 'recharge' ? params.rechargeTxNo ?? null : null,
+      params.type === 'recharge' ? params.rechargeScreenshotUrl ?? null : null,
       params.type === 'withdraw' ? params.withdrawAddress ?? null : null,
     ]
   )
@@ -69,7 +73,7 @@ export async function createFundApplication(params: {
 export async function getFundApplicationById(id: number): Promise<ReturnType<typeof rowToApp> | null> {
   const pool = getPool()
   const res = await pool.query<FundApplicationRow>(
-    'SELECT id, user_id, type, amount, status, created_at, reviewed_at, reviewer_id, remark, recharge_tx_no, withdraw_address FROM user_fund_applications WHERE id = $1',
+    'SELECT id, user_id, type, amount, status, created_at, reviewed_at, reviewer_id, remark, recharge_tx_no, recharge_screenshot_url, withdraw_address FROM user_fund_applications WHERE id = $1',
     [id]
   )
   if (res.rows.length === 0) return null
@@ -96,7 +100,7 @@ export async function listFundApplicationsByUser(
   const total = parseInt(countRes.rows[0]?.count ?? '0', 10)
 
   let listSql = `SELECT id, user_id, type, amount, status, created_at, reviewed_at, reviewer_id, remark
-    , recharge_tx_no, withdraw_address
+    , recharge_tx_no, recharge_screenshot_url, withdraw_address
     FROM user_fund_applications WHERE user_id = $1`
   const listParams: unknown[] = [userId]
   if (status) {
@@ -157,7 +161,7 @@ export async function listFundApplicationsForAdmin(opts: {
 
   // 查询列表
   let listSql = `SELECT a.id, a.user_id, a.type, a.amount, a.status, a.created_at, a.reviewed_at, a.reviewer_id, a.remark,
-    a.recharge_tx_no, a.withdraw_address,
+    a.recharge_tx_no, a.recharge_screenshot_url, a.withdraw_address,
     u.account AS user_account
     FROM user_fund_applications a
     LEFT JOIN users u ON u.id = a.user_id`
