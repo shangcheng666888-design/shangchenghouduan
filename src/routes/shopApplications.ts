@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { getByAccount } from '../db/usersDb.js'
+import { getByAccount, getById as getUserById } from '../db/usersDb.js'
 import { nextApplicationId, createShopApplication } from '../db/shopApplicationsDb.js'
 
 export const shopApplicationsRouter = Router()
@@ -46,6 +46,15 @@ shopApplicationsRouter.post('/', async (req, res) => {
         return
       }
     }
+    // 若前端带上了 userId，则在此处做一次存在性校验，避免写入「挂在已删除用户上的申请」
+    let normalizedUserId: string | null = null
+    if (typeof body.userId === 'string' && body.userId.trim()) {
+      const existingUser = await getUserById(body.userId.trim())
+      if (existingUser) {
+        normalizedUserId = existingUser.id
+      }
+    }
+
     const id = await nextApplicationId()
     await createShopApplication({
       id,
@@ -62,7 +71,7 @@ shopApplicationsRouter.post('/', async (req, res) => {
       idBack: body.idBack ?? null,
       idHandheld: body.idHandheld ?? null,
       signature: body.signature ?? null,
-      userId: typeof body.userId === 'string' && body.userId.trim() ? body.userId.trim() : null,
+      userId: normalizedUserId,
     })
     res.status(201).json({ success: true, applicationId: id, message: '申请已提交，请等待审核' })
   } catch (e) {

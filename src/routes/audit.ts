@@ -67,16 +67,33 @@ auditRouter.post('/shops/:id/approve', async (req, res) => {
     const shopId = await nextShopId()
 
     let ownerUserId: string
-    if (apply.userId && apply.userId.trim()) {
-      const user = await getUserById(apply.userId.trim())
-      if (!user) {
-        res.status(400).json({ success: false, message: '申请关联的用户不存在，请用户重新提交入驻申请' })
-        return
+    const trimmedUserId = apply.userId && typeof apply.userId === 'string' ? apply.userId.trim() : ''
+    const email = (apply.email ?? '').trim()
+
+    // 优先使用已有用户；若记录中 userId 无效或对应用户已被删除，则回退到「按邮箱创建新用户」的流程
+    if (trimmedUserId) {
+      const user = await getUserById(trimmedUserId)
+      if (user) {
+        ownerUserId = user.id
+        await updateUser(user.id, { shopId })
+      } else {
+        if (!email) {
+          res.status(400).json({ success: false, message: '申请缺少登录账号，请用户重新提交入驻申请' })
+          return
+        }
+        const userId = await nextUserId()
+        await createUser({
+          id: userId,
+          account: email,
+          password: apply.password,
+          balance: 0,
+          addresses: [],
+          shopId,
+          isBot: false,
+        })
+        ownerUserId = userId
       }
-      ownerUserId = user.id
-      await updateUser(user.id, { shopId })
     } else {
-      const email = apply.email.trim()
       if (!email) {
         res.status(400).json({ success: false, message: '申请缺少登录账号，请用户重新提交入驻申请' })
         return
