@@ -224,6 +224,116 @@ shopsRouter.get('/:id/recommendations', async (req, res) => {
   }
 })
 
+// 店铺交易密码：查询是否已设置（仅店铺所有者可查）
+shopsRouter.get('/:id/trade-password/status', async (req, res) => {
+  try {
+    const shopId = req.params.id
+    const userId = typeof req.query.userId === 'string' ? String(req.query.userId).trim() : ''
+    if (!userId) {
+      res.status(400).json({ success: false, message: '缺少用户信息' })
+      return
+    }
+    const auth = await assertShopOwnerByUserId(shopId, userId)
+    if (!auth.ok) {
+      res.status(403).json({ success: false, message: auth.message ?? '无权限' })
+      return
+    }
+    const pool = getPool()
+    const r = await pool.query<{ trade_password: string | null }>(
+      'SELECT trade_password FROM shops WHERE id = $1',
+      [shopId],
+    )
+    const pwd = r.rows[0]?.trade_password ?? ''
+    res.json({ hasTradePassword: !!(pwd && pwd.length > 0) })
+  } catch (e) {
+    console.error('[shops trade-password status]', e)
+    res.status(500).json({ success: false, message: '服务异常' })
+  }
+})
+
+// 店铺交易密码：首次设置
+shopsRouter.post('/:id/trade-password/set', async (req, res) => {
+  try {
+    const shopId = req.params.id
+    const body = req.body as { userId?: string; newTradePassword?: string }
+    const userId = typeof body.userId === 'string' ? body.userId.trim() : ''
+    const newPwd = typeof body.newTradePassword === 'string' ? body.newTradePassword.trim() : ''
+    if (!userId) {
+      res.status(400).json({ success: false, message: '缺少用户信息' })
+      return
+    }
+    const auth = await assertShopOwnerByUserId(shopId, userId)
+    if (!auth.ok) {
+      res.status(403).json({ success: false, message: auth.message ?? '无权限' })
+      return
+    }
+    const pinRegex = /^\d{6}$/
+    if (!pinRegex.test(newPwd)) {
+      res.status(400).json({ success: false, message: '交易密码需为 6 位数字' })
+      return
+    }
+    const pool = getPool()
+    const r = await pool.query<{ trade_password: string | null }>(
+      'SELECT trade_password FROM shops WHERE id = $1',
+      [shopId],
+    )
+    const existing = r.rows[0]?.trade_password ?? ''
+    if (existing && existing.length > 0) {
+      res.status(400).json({ success: false, message: '已设置过交易密码，请使用修改功能' })
+      return
+    }
+    await pool.query('UPDATE shops SET trade_password = $1 WHERE id = $2', [newPwd, shopId])
+    res.json({ success: true })
+  } catch (e) {
+    console.error('[shops trade-password set]', e)
+    res.status(500).json({ success: false, message: '服务异常' })
+  }
+})
+
+// 店铺交易密码：修改
+shopsRouter.post('/:id/trade-password/change', async (req, res) => {
+  try {
+    const shopId = req.params.id
+    const body = req.body as { userId?: string; oldTradePassword?: string; newTradePassword?: string }
+    const userId = typeof body.userId === 'string' ? body.userId.trim() : ''
+    const oldPwd = typeof body.oldTradePassword === 'string' ? body.oldTradePassword.trim() : ''
+    const newPwd = typeof body.newTradePassword === 'string' ? body.newTradePassword.trim() : ''
+    if (!userId) {
+      res.status(400).json({ success: false, message: '缺少用户信息' })
+      return
+    }
+    const auth = await assertShopOwnerByUserId(shopId, userId)
+    if (!auth.ok) {
+      res.status(403).json({ success: false, message: auth.message ?? '无权限' })
+      return
+    }
+    const pinRegex = /^\d{6}$/
+    if (!pinRegex.test(newPwd)) {
+      res.status(400).json({ success: false, message: '交易密码需为 6 位数字' })
+      return
+    }
+    const pool = getPool()
+    const r = await pool.query<{ trade_password: string | null }>(
+      'SELECT trade_password FROM shops WHERE id = $1',
+      [shopId],
+    )
+    const existing = r.rows[0]?.trade_password ?? ''
+    if (!existing) {
+      res.status(400).json({ success: false, message: '尚未设置交易密码，请先设置' })
+      return
+    }
+    if (!oldPwd || oldPwd !== existing) {
+      res.status(400).json({ success: false, message: '旧交易密码错误' })
+      return
+    }
+    await pool.query('UPDATE shops SET trade_password = $1 WHERE id = $2', [newPwd, shopId])
+    res.json({ success: true })
+  } catch (e) {
+    console.error('[shops trade-password change]', e)
+    res.status(500).json({ success: false, message: '服务异常' })
+  }
+})
+
 /** 添加推荐：商家在「我的商品」中点击点赞 */
 shopsRouter.post('/:id/recommendations', async (req, res) => {
   try {
@@ -349,6 +459,7 @@ shopsRouter.get('/:id/fund-applications', async (req, res) => {
   }
 })
 
+// 店铺钱包充值申请：校验店铺交易密码后提交，由后台审核通过后入账
 shopsRouter.post('/:id/recharge', async (req, res) => {
   try {
     const shopId = req.params.id
@@ -375,12 +486,17 @@ shopsRouter.post('/:id/recharge', async (req, res) => {
       res.status(400).json({ success: false, message: '请填写交易号' })
       return
     }
-    const user = await getUserById(userId)
-    if (!user) {
-      res.status(404).json({ success: false, message: '用户不存在' })
+    // 使用店铺独立交易密码，而非用户个人交易密码
+    const shopRow = await getPool().query<{ trade_password: string | null }>(
+      'SELECT trade_password FROM shops WHERE id = $1',
+      [shopId],
+    )
+    const shopTradePwd = shopRow.rows[0]?.trade_password ?? ''
+    if (!shopTradePwd) {
+      res.status(400).json({ success: false, message: '请先设置店铺交易密码' })
       return
     }
-    if (!user.tradePassword || user.tradePassword !== tradePassword) {
+    if (!tradePassword || tradePassword !== shopTradePwd) {
       res.status(400).json({ success: false, message: '交易密码错误' })
       return
     }
@@ -398,6 +514,7 @@ shopsRouter.post('/:id/recharge', async (req, res) => {
   }
 })
 
+// 店铺钱包提现申请：校验店铺交易密码后提交，由后台审核通过后扣款
 shopsRouter.post('/:id/withdraw', async (req, res) => {
   try {
     const shopId = req.params.id
@@ -425,12 +542,17 @@ shopsRouter.post('/:id/withdraw', async (req, res) => {
       return
     }
 
-    const user = await getUserById(userId)
-    if (!user) {
-      res.status(404).json({ success: false, message: '用户不存在' })
+    // 使用店铺独立交易密码，而非用户个人交易密码
+    const shopPwdRes = await getPool().query<{ trade_password: string | null }>(
+      'SELECT trade_password FROM shops WHERE id = $1',
+      [shopId],
+    )
+    const shopTradePwd = shopPwdRes.rows[0]?.trade_password ?? ''
+    if (!shopTradePwd) {
+      res.status(400).json({ success: false, message: '请先设置店铺交易密码' })
       return
     }
-    if (!user.tradePassword || user.tradePassword !== tradePassword) {
+    if (!tradePassword || tradePassword !== shopTradePwd) {
       res.status(400).json({ success: false, message: '交易密码错误' })
       return
     }
