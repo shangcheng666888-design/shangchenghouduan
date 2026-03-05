@@ -1,4 +1,4 @@
-import { getPool } from '../db.ts'
+import { getPool } from '../db.js'
 import { getById as getUserById, updateUser, insertFundLog } from './usersDb.js'
 
 export type FundApplicationType = 'recharge' | 'withdraw'

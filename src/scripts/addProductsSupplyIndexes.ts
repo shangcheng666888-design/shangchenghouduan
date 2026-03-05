@@ -1,5 +1,5 @@
 import 'dotenv/config'
-import { getPool } from '../db.ts'
+import { getPool } from '../db.js'
 
 async function main() {
   const pool = getPool()

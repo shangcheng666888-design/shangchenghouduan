@@ -1,4 +1,4 @@
-import { getPool } from '../db.ts'
+import { getPool } from '../db.js'
 import { getById as getUserById } from './usersDb.js'
 import { getShopById } from './shopsDb.js'
 

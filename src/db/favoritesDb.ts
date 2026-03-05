@@ -1,4 +1,4 @@
-import { getPool } from '../db.ts'
+import { getPool } from '../db.js'
 
 /** 商品收藏 */
 export async function addFavorite(params: {

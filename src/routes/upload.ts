@@ -80,7 +80,7 @@ uploadRouter.post('/', (req: Request, res) => {
         return
       }
     }
-    const file = (req as Request & { file?: multer.Multer.File & { filename?: string } }).file
+    const file = (req as Request & { file?: Express.Multer.File & { filename?: string } }).file
     if (!file) {
       res.status(400).json({ success: false, message: '未选择文件' })
       return
@@ -104,7 +104,7 @@ uploadRouter.post('/', (req: Request, res) => {
     }
 
     const base = `${req.protocol}://${req.get('host') ?? ''}`
-    const url = `${base}/uploads/${(file as multer.Multer.File & { filename: string }).filename}`
+    const url = `${base}/uploads/${(file as Express.Multer.File & { filename: string }).filename}`
     res.json({ success: true, url })
   })
 })

@@ -695,6 +695,7 @@ ordersRouter.post('/', async (req, res) => {
       items?: Array<{ id: string; productId?: string; title: string; price: number; quantity: number; image?: string; spec?: string }>
       address?: {
         recipient?: string
+        email?: string
         phoneCode?: string
         phone?: string
         country?: string

@@ -1,4 +1,4 @@
-import { getPool } from '../db.ts'
+import { getPool } from '../db.js'
 
 const AVATAR_OPTIONS = [
   ...Array.from({ length: 15 }, (_, i) => `/avatars/avatar${i + 1}.png`),
