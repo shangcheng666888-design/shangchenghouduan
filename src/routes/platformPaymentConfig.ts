@@ -7,16 +7,35 @@ export const platformPaymentConfigRouter = Router()
 platformPaymentConfigRouter.get('/', async (_req, res) => {
   try {
     const pool = getPool()
-    const r = await pool.query<{ receive_address: string; receive_qr_url: string }>(
-      `SELECT receive_address, receive_qr_url FROM platform_payment_config WHERE id = 1 LIMIT 1`
+    const r = await pool.query<{
+      receive_address: string
+      receive_qr_url: string
+      eth_address: string
+      btc_address: string
+      trc20_address: string
+    }>(
+      `SELECT receive_address, receive_qr_url, eth_address, btc_address, trc20_address
+       FROM platform_payment_config
+       WHERE id = 1
+       LIMIT 1`,
     )
     const row = r.rows[0]
     res.json({
       receiveAddress: row?.receive_address ?? '',
       receiveQrUrl: row?.receive_qr_url ?? '',
+      ethAddress: row?.eth_address ?? '',
+      btcAddress: row?.btc_address ?? '',
+      trc20Address: row?.trc20_address ?? '',
     })
   } catch (e) {
     console.error('[platform-payment-config]', e)
-    res.status(500).json({ receiveAddress: '', receiveQrUrl: '' })
+    res.status(500).json({
+      receiveAddress: '',
+      receiveQrUrl: '',
+      ethAddress: '',
+      btcAddress: '',
+      trc20Address: '',
+    })
   }
 })
+
