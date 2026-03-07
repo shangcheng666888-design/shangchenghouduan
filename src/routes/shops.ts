@@ -857,11 +857,17 @@ shopsRouter.patch('/:id', async (req, res) => {
     }
 
     let newLevel: number | null = null
-    if (body.level) {
-      if (body.level === '普通') newLevel = 1
-      else if (body.level === '银牌') newLevel = 2
-      else if (body.level === '金牌') newLevel = 3
-      else if (body.level === '钻石') newLevel = 4
+    if (body.level !== undefined && body.level !== null) {
+      const lv = body.level
+      if (typeof lv === 'number' && lv >= 1 && lv <= 4) {
+        newLevel = lv
+      } else {
+        const s = String(lv).trim()
+        if (s === '普通') newLevel = 1
+        else if (s === '银牌') newLevel = 2
+        else if (s === '金牌') newLevel = 3
+        else if (s === '钻石') newLevel = 4
+      }
       if (newLevel != null) {
         fields.push(`level = $${i++}`)
         values.push(newLevel)
@@ -909,7 +915,7 @@ shopsRouter.patch('/:id', async (req, res) => {
       return
     }
 
-    // 修改等级后，按新等级利润率重算该店铺所有已上架商品售价
+    // 修改等级后，按新等级利润率重算该店铺所有已上架商品售价（与上架时公式一致，无需商家下架再上架）
     if (newLevel != null) {
       const levelMargin: Record<number, number> = {
         1: 0.1,
@@ -918,25 +924,16 @@ shopsRouter.patch('/:id', async (req, res) => {
         4: 0.25,
       }
       const marginRate = levelMargin[newLevel] ?? levelMargin[1]
-      const listRes = await pool.query<{ product_id: string; purchase_price: string | null; selling_price: string | null }>(
-        `SELECT sp.product_id, p.purchase_price, p.selling_price
-         FROM shop_products sp
-         INNER JOIN products p ON p.product_id = sp.product_id
-         WHERE sp.shop_id = $1 AND sp.status = 'on'`,
-        [id]
+      await pool.query(
+        `UPDATE shop_products sp
+         SET price = ROUND((COALESCE(p.purchase_price::numeric, p.selling_price::numeric, 0) * (1 + $2))::numeric, 2)
+         FROM products p
+         WHERE p.product_id = sp.product_id
+           AND sp.shop_id = $1
+           AND sp.status = 'on'
+           AND COALESCE(p.purchase_price::numeric, p.selling_price::numeric, 0) > 0`,
+        [id, marginRate]
       )
-      for (const row of listRes.rows) {
-        const base =
-          row.purchase_price != null
-            ? Number(row.purchase_price)
-            : Number(row.selling_price ?? 0)
-        if (!Number.isFinite(base) || base < 0) continue
-        const newPrice = Math.round(base * (1 + marginRate) * 100) / 100
-        await pool.query(
-          'UPDATE shop_products SET price = $1 WHERE shop_id = $2 AND product_id = $3',
-          [String(newPrice), id, row.product_id]
-        )
-      }
     }
 
     res.json({ success: true })
