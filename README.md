@@ -18,6 +18,27 @@ npm run dev
 
 默认端口 **3001**，可通过环境变量 `PORT` 修改。
 
+## 部署与自动迁移
+
+部署到 Render / 其他托管时，若希望**每次发布自动执行数据库迁移**（执行 `migrations/` 下未执行过的 `.sql`），可任选其一：
+
+1. **推荐：启动前自动迁移**  
+   将托管平台的 **Start Command** 设为：
+   ```bash
+   npm run start:with-migrate
+   ```
+   每次实例启动时会先执行未执行的迁移，再启动服务。已执行过的迁移会记录在表 `schema_migrations` 中，不会重复执行。
+
+2. **仅发布时迁移**  
+   若平台支持 **Release Command**（如 Render），可设为：
+   ```bash
+   npm run migrate:all
+   ```
+   **Start Command** 保持：`npm start`。  
+   这样只在每次部署时跑一次迁移，再启动应用。
+
+本地单次执行全部迁移：`npm run migrate:all`；执行单个文件：`npm run migrate -- migrations/023_xxx.sql`。
+
 ## 环境变量
 
 | 变量 | 说明 | 必填 |
