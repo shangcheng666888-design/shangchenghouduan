@@ -914,27 +914,7 @@ shopsRouter.patch('/:id', async (req, res) => {
       res.status(404).json({ success: false, message: '店铺不存在' })
       return
     }
-
-    // 修改等级后，按新等级利润率重算该店铺所有已上架商品售价（与上架时公式一致，无需商家下架再上架）
-    if (newLevel != null) {
-      const levelMargin: Record<number, number> = {
-        1: 0.1,
-        2: 0.15,
-        3: 0.2,
-        4: 0.25,
-      }
-      const marginRate = levelMargin[newLevel] ?? levelMargin[1]
-      await pool.query(
-        `UPDATE shop_products sp
-         SET price = ROUND((COALESCE(p.purchase_price::numeric, p.selling_price::numeric, 0) * (1 + $2))::numeric, 2)
-         FROM products p
-         WHERE p.product_id = sp.product_id
-           AND sp.shop_id = $1
-           AND sp.status = 'on'
-           AND COALESCE(p.purchase_price::numeric, p.selling_price::numeric, 0) > 0`,
-        [id, marginRate]
-      )
-    }
+    // 等级若被修改，由数据库触发器 trg_shops_level_reprice 自动重算该店所有已上架商品售价，无需此处再算
 
     res.json({ success: true })
   } catch (e) {
