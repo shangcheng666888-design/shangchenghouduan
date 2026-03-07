@@ -856,15 +856,15 @@ shopsRouter.patch('/:id', async (req, res) => {
       values.push(body.banner === null || body.banner === '' ? null : String(body.banner))
     }
 
+    let newLevel: number | null = null
     if (body.level) {
-      let lvl: number | null = null
-      if (body.level === '普通') lvl = 1
-      else if (body.level === '银牌') lvl = 2
-      else if (body.level === '金牌') lvl = 3
-      else if (body.level === '钻石') lvl = 4
-      if (lvl != null) {
+      if (body.level === '普通') newLevel = 1
+      else if (body.level === '银牌') newLevel = 2
+      else if (body.level === '金牌') newLevel = 3
+      else if (body.level === '钻石') newLevel = 4
+      if (newLevel != null) {
         fields.push(`level = $${i++}`)
-        values.push(lvl)
+        values.push(newLevel)
       }
     }
     if (typeof body.followCount === 'number') {
@@ -908,6 +908,37 @@ shopsRouter.patch('/:id', async (req, res) => {
       res.status(404).json({ success: false, message: '店铺不存在' })
       return
     }
+
+    // 修改等级后，按新等级利润率重算该店铺所有已上架商品售价
+    if (newLevel != null) {
+      const levelMargin: Record<number, number> = {
+        1: 0.1,
+        2: 0.15,
+        3: 0.2,
+        4: 0.25,
+      }
+      const marginRate = levelMargin[newLevel] ?? levelMargin[1]
+      const listRes = await pool.query<{ product_id: string; purchase_price: string | null; selling_price: string | null }>(
+        `SELECT sp.product_id, p.purchase_price, p.selling_price
+         FROM shop_products sp
+         INNER JOIN products p ON p.product_id = sp.product_id
+         WHERE sp.shop_id = $1 AND sp.status = 'on'`,
+        [id]
+      )
+      for (const row of listRes.rows) {
+        const base =
+          row.purchase_price != null
+            ? Number(row.purchase_price)
+            : Number(row.selling_price ?? 0)
+        if (!Number.isFinite(base) || base < 0) continue
+        const newPrice = Math.round(base * (1 + marginRate) * 100) / 100
+        await pool.query(
+          'UPDATE shop_products SET price = $1 WHERE shop_id = $2 AND product_id = $3',
+          [String(newPrice), id, row.product_id]
+        )
+      }
+    }
+
     res.json({ success: true })
   } catch (e) {
     console.error('[shops patch]', e)
