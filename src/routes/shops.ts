@@ -43,6 +43,8 @@ shopsRouter.get('/', async (req, res) => {
         COALESCE(s.credit_score, 0)   AS credit_score,
         COALESCE(s.wallet_balance, 0) AS wallet_balance,
         COALESCE(s.visits, 0)         AS visits,
+        s.last_login_ip,
+        s.last_login_country,
         s.status,
         s.created_at,
         COALESCE(sp.listed_count, 0)  AS listed_count
@@ -73,6 +75,8 @@ shopsRouter.get('/', async (req, res) => {
       credit_score: number
       wallet_balance: number
       visits: number
+      last_login_ip: string | null
+      last_login_country: string | null
       status: string
       created_at: string
       listed_count: number
@@ -103,6 +107,8 @@ shopsRouter.get('/', async (req, res) => {
       creditScore: Number(row.credit_score ?? 0),
       walletBalance: Number(row.wallet_balance ?? 0),
       visits: Number(row.visits ?? 0),
+      lastLoginIp: row.last_login_ip ?? null,
+      lastLoginCountry: row.last_login_country ?? null,
       status: (row.status as 'normal' | 'banned') ?? 'normal',
       createdAt: row.created_at,
     }))

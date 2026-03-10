@@ -16,6 +16,8 @@ export interface ShopRow {
   sales: number
   good_rate: string
   visits: number
+  last_login_ip: string | null
+  last_login_country: string | null
   created_at: string
 }
 
@@ -36,6 +38,8 @@ function rowToShop(r: ShopRow) {
     sales: r.sales,
     goodRate: Number(r.good_rate),
     visits: Number(r.visits ?? 0),
+    lastLoginIp: r.last_login_ip ?? null,
+    lastLoginCountry: r.last_login_country ?? null,
     createdAt: r.created_at,
   }
 }
@@ -98,7 +102,7 @@ export async function createShop(params: {
 export async function getShopById(id: string): Promise<ReturnType<typeof rowToShop> | null> {
   const pool = getPool()
   const res = await pool.query<ShopRow>(
-    'SELECT id, name, owner_id, status, logo, banner, address, country, credit_score, wallet_balance, level, followers, sales, good_rate, visits, created_at FROM shops WHERE id = $1',
+    'SELECT id, name, owner_id, status, logo, banner, address, country, credit_score, wallet_balance, level, followers, sales, good_rate, visits, last_login_ip, last_login_country, created_at FROM shops WHERE id = $1',
     [id]
   )
   if (res.rows.length === 0) return null
@@ -108,7 +112,7 @@ export async function getShopById(id: string): Promise<ReturnType<typeof rowToSh
 export async function listShops(opts?: { shopId?: string }): Promise<ReturnType<typeof rowToShop>[]> {
   const pool = getPool()
   let sql =
-    'SELECT id, name, owner_id, status, logo, banner, address, country, credit_score, wallet_balance, level, followers, sales, good_rate, visits, created_at FROM shops WHERE 1=1'
+    'SELECT id, name, owner_id, status, logo, banner, address, country, credit_score, wallet_balance, level, followers, sales, good_rate, visits, last_login_ip, last_login_country, created_at FROM shops WHERE 1=1'
   const params: unknown[] = []
   if (opts?.shopId) {
     params.push(opts.shopId)

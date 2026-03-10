@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { getByAccount, getById, nextUserId, createUser } from '../db/usersDb.js'
+import { getPool } from '../db.js'
 
 export const authRouter = Router()
 
@@ -52,6 +53,39 @@ authRouter.post('/shop-login', async (req, res) => {
       res.status(403).json({ success: false, message: '该账号未开通店铺，请先申请入驻' })
       return
     }
+
+    // 记录店铺最近登录 IP 及其国家信息
+    const rawForwarded = (req.headers['x-forwarded-for'] as string | undefined) || ''
+    const clientIp =
+      rawForwarded.split(',')[0]?.trim() ||
+      (req.socket.remoteAddress ?? '')
+
+    ;(async () => {
+      try {
+        const pool = getPool()
+        let country: string | null = null
+        const ip = clientIp && clientIp !== '::1' ? clientIp : ''
+        if (ip) {
+          try {
+            const resp = await fetch(`https://ipapi.co/${encodeURIComponent(ip)}/json/`)
+            if (resp.ok) {
+              const data = (await resp.json()) as { country_name?: string | null }
+              if (data && typeof data.country_name === 'string' && data.country_name.trim()) {
+                country = data.country_name.trim()
+              }
+            }
+          } catch {
+            // 忽略 IP 位置解析失败，不影响登录
+          }
+        }
+        await pool.query(
+          'UPDATE shops SET last_login_ip = $1, last_login_country = $2 WHERE id = $3',
+          [ip || null, country, user.shopId],
+        )
+      } catch {
+        // 后台记录失败不影响用户登录
+      }
+    })().catch(() => {})
     res.json({
       success: true,
       user: { id: user.id, account: user.account, balance: user.balance, shopId: user.shopId, isBot: user.isBot ?? false, avatar: user.avatar ?? null },
