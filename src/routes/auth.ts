@@ -68,11 +68,14 @@ authRouter.post('/shop-login', async (req, res) => {
         const ip = clientIp && clientIp !== '::1' ? clientIp : ''
         if (ip) {
           try {
-            const resp = await fetch(`https://ipapi.co/${encodeURIComponent(ip)}/json/`)
+            // 使用 ip-api.com 查询国家信息，免注册，字段为 country
+            const resp = await fetch(
+              `http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,country`,
+            )
             if (resp.ok) {
-              const data = (await resp.json()) as { country_name?: string | null }
-              if (data && typeof data.country_name === 'string' && data.country_name.trim()) {
-                country = data.country_name.trim()
+              const data = (await resp.json()) as { status?: string; country?: string | null }
+              if (data.status === 'success' && typeof data.country === 'string' && data.country.trim()) {
+                country = data.country.trim()
               }
             }
           } catch {
