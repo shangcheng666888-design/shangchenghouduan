@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import fetch from 'node-fetch'
 import { getByAccount, getById, nextUserId, createUser } from '../db/usersDb.js'
 import { getPool } from '../db.js'
 
