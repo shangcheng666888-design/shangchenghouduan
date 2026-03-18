@@ -27,7 +27,12 @@ const PORT = process.env.PORT ?? 3001
 
 app.use(cors({ origin: true, credentials: true }))
 app.use(express.json({ limit: '10mb' }))
-app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')))
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), {
+  setHeaders: (res) => {
+    // 防止浏览器基于内容猜测类型，降低 XSS/钓鱼风险
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+  },
+}))
 
 app.use('/api/auth', authRouter)
 app.use('/api/admin', (req, res, next) => {

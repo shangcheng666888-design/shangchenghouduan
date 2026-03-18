@@ -3,6 +3,7 @@ import fs from 'fs'
 import { Router, type Request } from 'express'
 import multer from 'multer'
 import { createClient } from '@supabase/supabase-js'
+import { fileTypeFromBuffer } from 'file-type'
 import { verifyAdminToken } from '../adminSession.js'
 
 export const uploadRouter = Router()
@@ -46,20 +47,24 @@ if (!useBucket) {
 }
 
 const memoryStorage = multer.memoryStorage()
-const diskStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname) || '.jpg'
-    const name = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}${ext}`
-    cb(null, name)
-  },
-})
+
+const ALLOWED_MIME_TO_EXT: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+}
+
+function randomName(ext: string): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}${ext}`
+}
 
 const upload = multer({
-  storage: useBucket ? memoryStorage : diskStorage,
+  // 始终用内存存储：后续用文件魔数校验后再决定落盘/上传，避免依赖客户端的 mimetype/后缀
+  storage: memoryStorage,
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    const ok = /^image\/(jpeg|png|gif|webp)$/i.test(file.mimetype)
+    const ok = !!ALLOWED_MIME_TO_EXT[String(file.mimetype || '').toLowerCase()]
     if (ok) cb(null, true)
     else cb(new Error('仅支持图片：JPEG/PNG/GIF/WebP'))
   },
@@ -81,18 +86,26 @@ uploadRouter.post('/', (req: Request, res) => {
       }
     }
     const file = (req as Request & { file?: Express.Multer.File & { filename?: string } }).file
-    if (!file) {
+    if (!file || !file.buffer) {
       res.status(400).json({ success: false, message: '未选择文件' })
       return
     }
 
-    if (useBucket && supabase && file.buffer) {
+    // 以文件内容识别真实类型（防止伪造 mimetype / 后缀）
+    const sniff = await fileTypeFromBuffer(file.buffer).catch(() => null)
+    const realMime = String(sniff?.mime || '').toLowerCase()
+    const ext = ALLOWED_MIME_TO_EXT[realMime]
+    if (!ext) {
+      res.status(400).json({ success: false, message: '文件类型不合法：仅支持 JPEG/PNG/GIF/WebP' })
+      return
+    }
+
+    if (useBucket && supabase) {
       const bucketName = (req.body as { bucket?: string })?.bucket === 'commodity' ? BUCKET_COMMODITY : BUCKET
-      const ext = path.extname(file.originalname) || '.jpg'
-      const objectPath = `uploads/${Date.now()}-${Math.random().toString(36).slice(2, 10)}${ext}`
+      const objectPath = `uploads/${randomName(ext)}`
       const { data, error } = await supabase.storage
         .from(bucketName)
-        .upload(objectPath, file.buffer, { contentType: file.mimetype, upsert: false })
+        .upload(objectPath, file.buffer, { contentType: realMime, upsert: false })
       if (error) {
         console.error('[upload supabase]', error)
         res.status(500).json({ success: false, message: error.message || '上传到存储桶失败' })
@@ -103,8 +116,23 @@ uploadRouter.post('/', (req: Request, res) => {
       return
     }
 
+    // 本地存储：只落盘“安全后缀”的文件名
+    try {
+      fs.mkdirSync(UPLOAD_DIR, { recursive: true })
+    } catch {
+      // ignore
+    }
+    const filename = randomName(ext)
+    const fullPath = path.join(UPLOAD_DIR, filename)
+    try {
+      await fs.promises.writeFile(fullPath, file.buffer)
+    } catch (e) {
+      console.error('[upload writeFile]', e)
+      res.status(500).json({ success: false, message: '保存文件失败' })
+      return
+    }
     const base = `${req.protocol}://${req.get('host') ?? ''}`
-    const url = `${base}/uploads/${(file as Express.Multer.File & { filename: string }).filename}`
+    const url = `${base}/uploads/${filename}`
     res.json({ success: true, url })
   })
 })
