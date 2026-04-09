@@ -11,6 +11,19 @@ import { deleteStorageObjectIfOurs } from './upload.js'
 
 export const shopsRouter = Router()
 
+function getLevelMarginRate(level: number): number {
+  switch (level) {
+    case 2:
+      return 0.15
+    case 3:
+      return 0.2
+    case 4:
+      return 0.25
+    default:
+      return 0.1
+  }
+}
+
 shopsRouter.get('/', async (req, res) => {
   try {
     const shopId = req.query.shop as string | undefined
@@ -920,7 +933,24 @@ shopsRouter.patch('/:id', async (req, res) => {
       res.status(404).json({ success: false, message: '店铺不存在' })
       return
     }
-    // 等级若被修改，由数据库触发器 trg_shops_level_reprice 自动重算该店所有已上架商品售价，无需此处再算
+
+    // 兜底重算：即使数据库未部署 trg_shops_level_reprice 触发器，等级变更后也会立即重算在售商品售价
+    if (newLevel != null) {
+      const marginRate = getLevelMarginRate(newLevel)
+      await pool.query(
+        `UPDATE shop_products sp
+         SET price = ROUND(
+           (COALESCE(p.purchase_price::numeric, p.selling_price::numeric, 0) * (1 + $1::numeric))::numeric,
+           2
+         )
+         FROM products p
+         WHERE p.product_id = sp.product_id
+           AND sp.shop_id = $2
+           AND sp.status = 'on'
+           AND COALESCE(p.purchase_price::numeric, p.selling_price::numeric, 0) > 0`,
+        [marginRate, id],
+      )
+    }
 
     res.json({ success: true })
   } catch (e) {
