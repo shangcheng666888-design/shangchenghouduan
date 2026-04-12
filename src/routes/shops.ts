@@ -886,7 +886,12 @@ shopsRouter.patch('/:id', async (req, res) => {
         else if (s === '银牌') newLevel = 2
         else if (s === '金牌') newLevel = 3
         else if (s === '钻石') newLevel = 4
+        else {
+          const n = Number(s)
+          if (Number.isFinite(n) && n >= 1 && n <= 4) newLevel = Math.round(n)
+        }
       }
+      console.log(`[shops patch] level input=${JSON.stringify(lv)} parsed newLevel=${newLevel}`)
       if (newLevel != null) {
         fields.push(`level = $${i++}`)
         values.push(newLevel)
@@ -934,10 +939,11 @@ shopsRouter.patch('/:id', async (req, res) => {
       return
     }
 
-    // 兜底重算：即使数据库未部署 trg_shops_level_reprice 触发器，等级变更后也会立即重算在售商品售价
+    let repriced = 0
     if (newLevel != null) {
       const marginRate = getLevelMarginRate(newLevel)
-      await pool.query(
+      console.log(`[shops patch] reprice shop=${id} newLevel=${newLevel} marginRate=${marginRate}`)
+      const repriceResult = await pool.query(
         `UPDATE shop_products sp
          SET price = ROUND(
            (COALESCE(p.purchase_price::numeric, p.selling_price::numeric, 0) * (1 + $1::numeric))::numeric,
@@ -950,11 +956,76 @@ shopsRouter.patch('/:id', async (req, res) => {
            AND COALESCE(p.purchase_price::numeric, p.selling_price::numeric, 0) > 0`,
         [marginRate, id],
       )
+      repriced = repriceResult.rowCount ?? 0
+      console.log(`[shops patch] repriced ${repriced} products for shop=${id}`)
     }
 
-    res.json({ success: true })
+    res.json({ success: true, repriced })
   } catch (e) {
     console.error('[shops patch]', e)
     res.status(500).json({ success: false, message: '服务异常' })
+  }
+})
+
+/** 手动重算某店铺（或全部店铺）已上架商品售价，按当前等级利润率 */
+shopsRouter.post('/reprice', async (req, res) => {
+  try {
+    const body = req.body as { shopId?: string }
+    const pool = getPool()
+    let totalRepriced = 0
+
+    if (body.shopId) {
+      const shopRes = await pool.query<{ level: number | null }>(
+        'SELECT level FROM shops WHERE id = $1',
+        [body.shopId],
+      )
+      if (shopRes.rows.length === 0) {
+        res.status(404).json({ success: false, message: '店铺不存在' })
+        return
+      }
+      const level = shopRes.rows[0].level ?? 1
+      const marginRate = getLevelMarginRate(level)
+      const r = await pool.query(
+        `UPDATE shop_products sp
+         SET price = ROUND(
+           (COALESCE(p.purchase_price::numeric, p.selling_price::numeric, 0) * (1 + $1::numeric))::numeric,
+           2
+         )
+         FROM products p
+         WHERE p.product_id = sp.product_id
+           AND sp.shop_id = $2
+           AND sp.status = 'on'
+           AND COALESCE(p.purchase_price::numeric, p.selling_price::numeric, 0) > 0`,
+        [marginRate, body.shopId],
+      )
+      totalRepriced = r.rowCount ?? 0
+    } else {
+      const shopsRes = await pool.query<{ id: string; level: number | null }>(
+        'SELECT id, level FROM shops',
+      )
+      for (const shop of shopsRes.rows) {
+        const marginRate = getLevelMarginRate(shop.level ?? 1)
+        const r = await pool.query(
+          `UPDATE shop_products sp
+           SET price = ROUND(
+             (COALESCE(p.purchase_price::numeric, p.selling_price::numeric, 0) * (1 + $1::numeric))::numeric,
+             2
+           )
+           FROM products p
+           WHERE p.product_id = sp.product_id
+             AND sp.shop_id = $2
+             AND sp.status = 'on'
+             AND COALESCE(p.purchase_price::numeric, p.selling_price::numeric, 0) > 0`,
+          [marginRate, shop.id],
+        )
+        totalRepriced += r.rowCount ?? 0
+      }
+    }
+
+    console.log(`[shops reprice] updated ${totalRepriced} product prices`)
+    res.json({ success: true, repriced: totalRepriced })
+  } catch (e) {
+    console.error('[shops reprice]', e)
+    res.status(500).json({ success: false, message: '重算失败' })
   }
 })

@@ -582,6 +582,7 @@ productsRouter.get('/:id', async (req, res) => {
         const r = await client.query(
           `SELECT p.product_id, p.goods_id, p.category_id, p.sub_category_id, p.product_name,
                   p.purchase_price, p.selling_price, p.description_html, p.detail_html, p.main_images,
+                  sp.price AS listing_price, sp.shop_id,
                   c.name_en AS category_name, sc.name_en AS sub_category_name
            FROM products p
            INNER JOIN shop_products sp ON sp.product_id = p.product_id AND sp.status = 'on'
@@ -597,6 +598,8 @@ productsRouter.get('/:id', async (req, res) => {
           return
         }
         const mainImages = row.main_images ?? []
+        const listingPrice = row.listing_price != null ? Number(row.listing_price) : null
+        const productPrice = Number(row.selling_price) || 0
         const skuRes = await client.query(
           `SELECT ps.sku_id, ps.product_id, ps.attrs, ps.purchase_price, ps.selling_price, ps.cover_img, ps.images
            FROM product_skus ps WHERE ps.product_id = $1 LIMIT 50`,
@@ -608,7 +611,8 @@ productsRouter.get('/:id', async (req, res) => {
           title: row.product_name,
           image: Array.isArray(mainImages) && mainImages[0] ? mainImages[0] : '',
           images: mainImages,
-          price: Number(row.selling_price) || 0,
+          price: listingPrice != null ? listingPrice : productPrice,
+          shopId: row.shop_id,
           purchasePrice: row.purchase_price != null ? Number(row.purchase_price) : null,
           category: row.category_name ?? row.category_id,
           subCategory: row.sub_category_name ?? row.sub_category_id,
