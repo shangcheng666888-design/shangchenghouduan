@@ -505,6 +505,7 @@ productsRouter.get('/', async (req, res) => {
       try {
         const joinListed = `FROM shop_products sp
              INNER JOIN products p ON p.product_id = sp.product_id AND sp.status = 'on'
+             LEFT JOIN shops s ON s.id = sp.shop_id
              LEFT JOIN categories c ON c.category_id = p.category_id
              LEFT JOIN categories sc ON sc.category_id = p.sub_category_id`
         const selectCols = `SELECT sp.id AS listing_id, sp.shop_id, sp.product_id, sp.price AS listing_price, sp.listed_at,
@@ -520,7 +521,7 @@ productsRouter.get('/', async (req, res) => {
           filterParams.push(categoryId.trim())
         }
         if (search.length > 0) {
-          whereParts.push(`(p.product_name ILIKE $${filterParams.length + 1} OR p.product_id::text ILIKE $${filterParams.length + 1})`)
+          whereParts.push(`(p.product_name ILIKE $${filterParams.length + 1} OR p.product_id::text ILIKE $${filterParams.length + 1} OR sp.shop_id ILIKE $${filterParams.length + 1} OR s.name ILIKE $${filterParams.length + 1})`)
           filterParams.push(`%${search}%`)
         }
         const where = whereParts.length > 0 ? ' WHERE ' + whereParts.join(' AND ') : ''
@@ -547,7 +548,7 @@ productsRouter.get('/', async (req, res) => {
             sales: 0,
           }
         })
-        const countBase = `FROM shop_products sp INNER JOIN products p ON p.product_id = sp.product_id AND sp.status = 'on'`
+        const countBase = `FROM shop_products sp INNER JOIN products p ON p.product_id = sp.product_id AND sp.status = 'on' LEFT JOIN shops s ON s.id = sp.shop_id`
         const countWhere = where
         const countRes = await client.query(
           `SELECT COUNT(*) AS c ${countBase}${countWhere}`,
