@@ -51,5 +51,10 @@ async function main() {
 
 main().catch((err) => {
   console.error('[migrate] 失败:', err)
+  const code = (err as { code?: string })?.code
+  if (code === 'ENOTFOUND' || code === 'ECONNREFUSED' || code === 'ETIMEDOUT') {
+    console.warn('[migrate] 数据库不可达，跳过迁移，服务器继续启动')
+    process.exit(0)
+  }
   process.exit(1)
 })
