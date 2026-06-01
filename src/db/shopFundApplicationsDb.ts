@@ -4,6 +4,13 @@ import { getShopById } from './shopsDb.js'
 
 export type ShopFundApplicationType = 'recharge' | 'withdraw'
 export type ShopFundApplicationStatus = 'pending' | 'approved' | 'rejected'
+export type ShopWithdrawNetwork = 'TRC20' | 'ERC20'
+
+export function normalizeShopWithdrawNetwork(raw: unknown): ShopWithdrawNetwork | null {
+  const s = String(raw ?? '').trim().toUpperCase()
+  if (s === 'TRC20' || s === 'ERC20') return s
+  return null
+}
 
 export interface ShopFundApplicationRow {
   id: number
@@ -14,6 +21,7 @@ export interface ShopFundApplicationRow {
   recharge_tx_no: string | null
   recharge_screenshot_url: string | null
   withdraw_address: string | null
+  withdraw_network: string | null
   reviewed_at: string | null
   reviewer_id: string | null
   remark: string | null
@@ -44,6 +52,7 @@ function rowToApp(r: ShopFundApplicationRow) {
     rechargeTxNo: r.recharge_tx_no,
     rechargeScreenshotUrl: r.recharge_screenshot_url ?? null,
     withdrawAddress: r.withdraw_address,
+    withdrawNetwork: normalizeShopWithdrawNetwork(r.withdraw_network) ?? (type === 'withdraw' ? 'TRC20' : null),
     orderNo: type === 'recharge' ? `SRCH${pad8(r.id)}` : `SWD${pad8(r.id)}`,
   }
 }
@@ -91,11 +100,16 @@ export async function createShopFundApplication(params: {
   rechargeTxNo?: string | null
   rechargeScreenshotUrl?: string | null
   withdrawAddress?: string | null
+  withdrawNetwork?: ShopWithdrawNetwork | null
 }): Promise<{ id: number }> {
   const pool = getPool()
+  const withdrawNetwork =
+    params.type === 'withdraw'
+      ? normalizeShopWithdrawNetwork(params.withdrawNetwork) ?? 'TRC20'
+      : null
   const res = await pool.query<{ id: number }>(
-    `INSERT INTO shop_fund_applications (shop_id, type, amount, status, recharge_tx_no, recharge_screenshot_url, withdraw_address)
-     VALUES ($1, $2, $3, 'pending', $4, $5, $6)
+    `INSERT INTO shop_fund_applications (shop_id, type, amount, status, recharge_tx_no, recharge_screenshot_url, withdraw_address, withdraw_network)
+     VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7)
      RETURNING id`,
     [
       params.shopId,
@@ -104,6 +118,7 @@ export async function createShopFundApplication(params: {
       params.rechargeTxNo ?? null,
       params.type === 'recharge' ? (params.rechargeScreenshotUrl ?? null) : null,
       params.withdrawAddress ?? null,
+      withdrawNetwork,
     ]
   )
   return { id: Number(res.rows[0]?.id) }
@@ -142,7 +157,7 @@ export async function listShopFundApplicationsByShop(opts: {
 
   const offset = (page - 1) * pageSize
   const listRes = await pool.query<ShopFundApplicationRow>(
-    `SELECT id, shop_id, type, amount::text AS amount, status, recharge_tx_no, recharge_screenshot_url, withdraw_address, reviewed_at, reviewer_id, remark, created_at
+    `SELECT id, shop_id, type, amount::text AS amount, status, recharge_tx_no, recharge_screenshot_url, withdraw_address, withdraw_network, reviewed_at, reviewer_id, remark, created_at
      FROM shop_fund_applications
      ${where}
      ORDER BY created_at DESC
@@ -216,6 +231,7 @@ export async function listShopFundApplicationsForAdmin(opts: {
         a.recharge_tx_no,
         a.recharge_screenshot_url,
         a.withdraw_address,
+        a.withdraw_network,
         a.reviewed_at,
         a.reviewer_id,
         a.remark,
@@ -247,7 +263,7 @@ export async function approveShopFundApplication(
 ): Promise<{ success: boolean; message?: string }> {
   const pool = getPool()
   const res = await pool.query<ShopFundApplicationRow>(
-    `SELECT id, shop_id, type, amount::text AS amount, status, recharge_tx_no, withdraw_address, reviewed_at, reviewer_id, remark, created_at
+    `SELECT id, shop_id, type, amount::text AS amount, status, recharge_tx_no, withdraw_address, withdraw_network, reviewed_at, reviewer_id, remark, created_at
      FROM shop_fund_applications
      WHERE id = $1`,
     [applicationId]
@@ -279,7 +295,10 @@ export async function approveShopFundApplication(
     amount: app.type === 'recharge' ? amount : -amount,
     balanceAfter,
     relatedId: String(applicationId),
-    remark: app.type === 'recharge' ? '店铺充值（审核通过）' : '店铺提现（审核通过）',
+    remark:
+      app.type === 'recharge'
+        ? '店铺充值（审核通过）'
+        : `店铺提现（审核通过，${app.withdrawNetwork ?? 'TRC20'}）`,
   })
 
   const now = new Date().toISOString()

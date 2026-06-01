@@ -12,6 +12,7 @@ async function main() {
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
     recharge_tx_no TEXT,
     withdraw_address TEXT,
+    withdraw_network TEXT,
     reviewed_at TIMESTAMPTZ,
     reviewer_id TEXT,
     remark TEXT,

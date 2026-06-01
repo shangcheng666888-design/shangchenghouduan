@@ -6,10 +6,20 @@ import {
   assertShopOwnerByUserId,
   createShopFundApplication,
   listShopFundApplicationsByShop,
+  normalizeShopWithdrawNetwork,
+  type ShopWithdrawNetwork,
 } from '../db/shopFundApplicationsDb.js'
 import { deleteStorageObjectIfOurs } from './upload.js'
 
 export const shopsRouter = Router()
+
+function isValidWithdrawAddress(network: ShopWithdrawNetwork, address: string): boolean {
+  const a = address.trim()
+  if (network === 'TRC20') {
+    return /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(a)
+  }
+  return /^0x[a-fA-F0-9]{40}$/.test(a)
+}
 
 function getLevelMarginRate(level: number): number {
   switch (level) {
@@ -537,10 +547,17 @@ shopsRouter.post('/:id/recharge', async (req, res) => {
 shopsRouter.post('/:id/withdraw', async (req, res) => {
   try {
     const shopId = req.params.id
-    const body = req.body as { userId?: string; amount?: number; tradePassword?: string; address?: string }
+    const body = req.body as {
+      userId?: string
+      amount?: number
+      tradePassword?: string
+      address?: string
+      network?: string
+    }
     const userId = typeof body.userId === 'string' ? body.userId.trim() : ''
     const tradePassword = typeof body.tradePassword === 'string' ? body.tradePassword.trim() : ''
     const address = typeof body.address === 'string' ? body.address.trim() : ''
+    const network = normalizeShopWithdrawNetwork(body.network) ?? 'TRC20'
     const amount = Number(body.amount)
 
     if (!userId) {
@@ -558,6 +575,16 @@ shopsRouter.post('/:id/withdraw', async (req, res) => {
     }
     if (!address) {
       res.status(400).json({ success: false, message: '请填写提现地址' })
+      return
+    }
+    if (!isValidWithdrawAddress(network, address)) {
+      res.status(400).json({
+        success: false,
+        message:
+          network === 'ERC20'
+            ? '请输入有效的 ERC20 地址（0x 开头的 42 位十六进制）'
+            : '请输入有效的 TRC20 地址（T 开头的波场地址）',
+      })
       return
     }
 
@@ -591,6 +618,7 @@ shopsRouter.post('/:id/withdraw', async (req, res) => {
       type: 'withdraw',
       amount,
       withdrawAddress: address,
+      withdrawNetwork: network,
     })
     res.status(201).json({ success: true, id })
   } catch (e) {
