@@ -716,6 +716,7 @@ shopsRouter.get('/:id/dashboard', async (req, res) => {
       return
     }
     const s = shopRes.rows[0]
+    const shopLevel = Number(s.level ?? 1)
     const creditScore = Number(s.credit_score ?? 0)
     const goodRate = Number(s.good_rate ?? 0)
     const followers = Number(s.followers ?? 0)
@@ -795,9 +796,11 @@ shopsRouter.get('/:id/dashboard', async (req, res) => {
     const trendRes = await pool.query<{
       day: string
       order_count: string
+      sales_amount: string
     }>(
       `SELECT to_char(created_at::date, 'YYYY-MM-DD') AS day,
-              count(*)::text AS order_count
+              count(*)::text AS order_count,
+              COALESCE(SUM(total_amount), 0)::text AS sales_amount
        FROM orders
        WHERE shop_id = $1
          AND created_at::date >= CURRENT_DATE - INTERVAL '6 days'
@@ -805,15 +808,20 @@ shopsRouter.get('/:id/dashboard', async (req, res) => {
        ORDER BY day`,
       [shopId],
     )
-    const trendMap = new Map<string, number>()
+    const trendMap = new Map<string, { orders: number; sales: number }>()
     for (const row of trendRes.rows) {
       const cnt = parseInt(row.order_count ?? '0', 10)
-      trendMap.set(row.day, Number.isFinite(cnt) ? cnt : 0)
+      const sales = Math.round(Number(row.sales_amount ?? 0) * 100) / 100
+      trendMap.set(row.day, {
+        orders: Number.isFinite(cnt) ? cnt : 0,
+        sales: Number.isFinite(sales) ? sales : 0,
+      })
     }
 
     const today = new Date()
     const dayLabels: string[] = []
     const ordersSeries: number[] = []
+    const salesSeries: number[] = []
     const weekdayMap = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
     for (let i = 6; i >= 0; i -= 1) {
       const d = new Date(today)
@@ -822,9 +830,10 @@ shopsRouter.get('/:id/dashboard', async (req, res) => {
       const m = String(d.getMonth() + 1).padStart(2, '0')
       const day = String(d.getDate()).padStart(2, '0')
       const key = `${y}-${m}-${day}`
-      const cnt = trendMap.get(key) ?? 0
+      const point = trendMap.get(key) ?? { orders: 0, sales: 0 }
       dayLabels.push(weekdayMap[d.getDay()])
-      ordersSeries.push(cnt)
+      ordersSeries.push(point.orders)
+      salesSeries.push(point.sales)
     }
 
     res.json({
@@ -834,6 +843,8 @@ shopsRouter.get('/:id/dashboard', async (req, res) => {
       totalProfit,
       pendingOrders,
       unsettledAmount,
+      shopLevel,
+      shopSalesTotal: salesTotal,
       creditScore,
       goodRate,
       followers,
@@ -844,6 +855,7 @@ shopsRouter.get('/:id/dashboard', async (req, res) => {
       orderTrend: {
         labels: dayLabels,
         orders: ordersSeries,
+        sales: salesSeries,
       },
     })
   } catch (e) {
