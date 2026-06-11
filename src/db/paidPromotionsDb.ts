@@ -34,6 +34,7 @@ function rowToPromotion(row) {
         id: Number(row.id),
         shopId: row.shop_id,
         shopName: row.shop_name ?? null,
+        ownerAccount: row.owner_account ?? null,
         channel: row.channel,
         status: row.status,
         targetType: row.target_type ?? null,
@@ -82,6 +83,7 @@ const PROMOTION_SELECT = `
   SELECT
     p.*,
     s.name AS shop_name,
+    u.account AS owner_account,
     prod.product_name AS target_product_title,
     CASE
       WHEN jsonb_typeof(prod.main_images) = 'array' AND jsonb_array_length(prod.main_images) > 0
@@ -90,6 +92,7 @@ const PROMOTION_SELECT = `
     END AS target_product_image
   FROM shop_paid_promotions p
   LEFT JOIN shops s ON s.id = p.shop_id
+  LEFT JOIN users u ON u.id = s.owner_id
   LEFT JOIN shop_products sp ON sp.id::text = p.target_listing_id AND sp.shop_id = p.shop_id
   LEFT JOIN products prod ON prod.product_id = sp.product_id
 `;
@@ -165,13 +168,30 @@ export async function getPromotionById(id) {
     return rowToPromotion(res.rows[0]);
 }
 
-export async function listPromotions({ status } = {}) {
+export async function listPromotions({ status, shopId, search, limit, offset } = {}) {
     const pool = getPool();
     const params = [];
     let where = 'WHERE 1=1';
     if (status && STATUSES.has(status)) {
         params.push(status);
         where += ` AND p.status = $${params.length}`;
+    }
+    if (shopId) {
+        params.push(shopId);
+        where += ` AND p.shop_id = $${params.length}`;
+    }
+    if (search) {
+        params.push(`%${search}%`);
+        where += ` AND (p.shop_id ILIKE $${params.length} OR s.name ILIKE $${params.length} OR u.account ILIKE $${params.length})`;
+    }
+    let limitSql = '';
+    if (Number.isFinite(limit) && limit > 0) {
+        params.push(Math.min(limit, 200));
+        limitSql += ` LIMIT $${params.length}`;
+    }
+    if (Number.isFinite(offset) && offset > 0) {
+        params.push(offset);
+        limitSql += ` OFFSET $${params.length}`;
     }
     const res = await pool.query(`${PROMOTION_SELECT}
      ${where}
@@ -183,8 +203,49 @@ export async function listPromotions({ status } = {}) {
          WHEN 'paused' THEN 3
          ELSE 4
        END,
-       p.updated_at DESC`, params);
+       p.updated_at DESC${limitSql}`, params);
     return res.rows.map(rowToPromotion);
+}
+
+export async function listPromotionRecordsAdmin({ shopId, search, status, limit = 100, offset = 0 } = {}) {
+    const pool = getPool();
+    const params = [];
+    let where = 'WHERE 1=1';
+    if (shopId) {
+        params.push(shopId);
+        where += ` AND p.shop_id = $${params.length}`;
+    }
+    if (search) {
+        params.push(`%${search}%`);
+        where += ` AND (p.shop_id ILIKE $${params.length} OR s.name ILIKE $${params.length} OR u.account ILIKE $${params.length})`;
+    }
+    if (status && status !== 'all' && STATUSES.has(status)) {
+        params.push(status);
+        where += ` AND p.status = $${params.length}`;
+    }
+    params.push(Math.min(Math.max(limit, 1), 200));
+    params.push(Math.max(offset, 0));
+    const res = await pool.query(`${PROMOTION_SELECT}
+     ${where}
+     ORDER BY p.created_at DESC
+     LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
+    const promotions = res.rows.map(rowToPromotion);
+    const items = [];
+    for (const promotion of promotions) {
+        let metricsSummary = null;
+        if (promotion.campaignStartAt) {
+            const metrics = await getPromotionMetrics(promotion.id);
+            metricsSummary = {
+                totals: metrics.totals,
+                presets: metrics.presets,
+                campaignProgress: metrics.campaignProgress,
+                budgetProgress: metrics.budgetProgress,
+                isCompleted: metrics.isCompleted,
+            };
+        }
+        items.push({ promotion, metricsSummary });
+    }
+    return items;
 }
 
 export async function createPromotion({ shopId, channel, status = 'pending', adminNote }) {
@@ -411,24 +472,25 @@ export async function getPromotionMetrics(promotionId) {
     if (promotion.status === 'active')
         await syncPromotionVisitsToShop(promotion);
     const planRows = await getPlanRows(promotionId);
-    if (promotion.status !== 'active' && promotion.status !== 'completed') {
+    const presets = {
+        impressions: promotion.presetImpressions ?? 0,
+        clicks: promotion.presetClicks ?? 0,
+        visits: promotion.presetVisits ?? 0,
+        orders: promotion.presetOrders ?? 0,
+        spend: promotion.budgetTotal ?? 0,
+        revenue: promotion.presetRevenue ?? 0,
+    };
+    if (planRows.length === 0) {
         return {
             series: [],
             totals: { impressions: 0, clicks: 0, visits: 0, orders: 0, spend: 0, revenue: 0 },
-            presets: {
-                impressions: promotion.presetImpressions ?? 0,
-                clicks: promotion.presetClicks ?? 0,
-                visits: promotion.presetVisits ?? 0,
-                orders: promotion.presetOrders ?? 0,
-                spend: promotion.budgetTotal ?? 0,
-                revenue: promotion.presetRevenue ?? 0,
-            },
+            presets,
             campaignProgress: 0,
             budgetProgress: 0,
-            isCompleted: false,
+            isCompleted: promotion.status === 'completed',
         };
     }
-    if (promotion.status === 'completed' || planRows.length === 0) {
+    if (promotion.status === 'completed' || promotion.status === 'ended') {
         const totals = planRows.reduce((acc, row) => ({
             impressions: acc.impressions + row.impressions,
             clicks: acc.clicks + row.clicks,
@@ -453,6 +515,18 @@ export async function getPromotionMetrics(promotionId) {
             isCompleted: true,
         };
     }
+    if (promotion.status === 'paused') {
+        const released = getReleasedMetricsFromPlan(planRows, {
+            campaignStartAt: promotion.campaignStartAt,
+            campaignEndAt: promotion.campaignEndAt,
+            scheduleSeed: promotion.scheduleSeed ?? promotion.id,
+        });
+        return {
+            ...released,
+            presets,
+            isCompleted: false,
+        };
+    }
     const released = getReleasedMetricsFromPlan(planRows, {
         campaignStartAt: promotion.campaignStartAt,
         campaignEndAt: promotion.campaignEndAt,
@@ -460,14 +534,7 @@ export async function getPromotionMetrics(promotionId) {
     });
     return {
         ...released,
-        presets: {
-            impressions: promotion.presetImpressions ?? 0,
-            clicks: promotion.presetClicks ?? 0,
-            visits: promotion.presetVisits ?? 0,
-            orders: promotion.presetOrders ?? 0,
-            spend: promotion.budgetTotal ?? 0,
-            revenue: promotion.presetRevenue ?? 0,
-        },
+        presets,
     };
 }
 

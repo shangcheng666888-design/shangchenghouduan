@@ -7,6 +7,7 @@ import {
     getPromotionMetrics,
     launchCampaign,
     listActiveCampaignsWithProgress,
+    listPromotionRecordsAdmin,
     listPromotions,
     saveCampaignDraft,
     updatePromotion,
@@ -17,11 +18,35 @@ export const adminPaidPromotionsRouter = Router();
 adminPaidPromotionsRouter.get('/', async (req, res) => {
     try {
         const status = typeof req.query.status === 'string' ? req.query.status.trim() : undefined;
-        const list = await listPromotions({ status });
+        const shopId = typeof req.query.shopId === 'string' ? req.query.shopId.trim() : undefined;
+        const search = typeof req.query.search === 'string' ? req.query.search.trim() : undefined;
+        const list = await listPromotions({ status, shopId, search });
         res.json({ list });
     }
     catch (e) {
         console.error('[admin paid-promotions list]', e);
+        res.status(500).json({ success: false, message: '服务异常' });
+    }
+});
+
+adminPaidPromotionsRouter.get('/records', async (req, res) => {
+    try {
+        const status = typeof req.query.status === 'string' ? req.query.status.trim() : undefined;
+        const shopId = typeof req.query.shopId === 'string' ? req.query.shopId.trim() : undefined;
+        const search = typeof req.query.search === 'string' ? req.query.search.trim() : undefined;
+        const limit = Number(req.query.limit);
+        const offset = Number(req.query.offset);
+        const list = await listPromotionRecordsAdmin({
+            status: status || undefined,
+            shopId: shopId || undefined,
+            search: search || undefined,
+            limit: Number.isFinite(limit) ? limit : 100,
+            offset: Number.isFinite(offset) ? offset : 0,
+        });
+        res.json({ list });
+    }
+    catch (e) {
+        console.error('[admin paid-promotions records]', e);
         res.status(500).json({ success: false, message: '服务异常' });
     }
 });
