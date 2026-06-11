@@ -252,3 +252,32 @@ export const PROMOTION_AUDIENCES = [
     { value: 'parents', labelZh: '家长群体', labelEn: 'Parents' },
     { value: 'high_intent', labelZh: '高购买意向', labelEn: 'High purchase intent' },
 ];
+
+const AUDIENCE_VALUE_SET = new Set(PROMOTION_AUDIENCES.map((item) => item.value));
+
+/** Normalize merchant audience selection: multi-value comma string, or sole `all`. */
+export function normalizeTargetAudience(input) {
+    let values = [];
+    if (Array.isArray(input)) {
+        values = input.map((value) => String(value).trim()).filter(Boolean);
+    }
+    else if (typeof input === 'string') {
+        values = input.split(',').map((value) => value.trim()).filter(Boolean);
+    }
+    else if (input != null && input !== '') {
+        values = [String(input).trim()];
+    }
+    if (values.length === 0)
+        return '';
+    if (values.includes('all')) {
+        if (!AUDIENCE_VALUE_SET.has('all'))
+            throw new Error('audience_invalid');
+        return 'all';
+    }
+    const unique = [...new Set(values)];
+    for (const value of unique) {
+        if (!AUDIENCE_VALUE_SET.has(value))
+            throw new Error('audience_invalid');
+    }
+    return unique.join(',');
+}

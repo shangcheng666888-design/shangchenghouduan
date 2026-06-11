@@ -4,6 +4,7 @@ import {
     addDurationToDate,
     buildCampaignScheduleRows,
     getReleasedMetricsFromPlan,
+    normalizeTargetAudience,
     parseCampaignDuration,
     PROMOTION_AUDIENCES,
     PROMOTION_REGIONS,
@@ -15,7 +16,6 @@ const STATUSES = new Set(['pending', 'awaiting_launch', 'active', 'paused', 'end
 const TARGET_TYPES = new Set(['shop', 'product']);
 const MERCHANT_VISIBLE_STATUSES = ['pending', 'awaiting_launch', 'active'];
 const REGION_VALUES = new Set(PROMOTION_REGIONS.map((item) => item.value));
-const AUDIENCE_VALUES = new Set(PROMOTION_AUDIENCES.map((item) => item.value));
 
 function canConfigureOrLaunchCampaign(promotion) {
     if (!promotion)
@@ -313,15 +313,21 @@ export async function setPromotionTarget(id, {
         throw new Error('promotion_not_editable');
     const pool = getPool();
     const region = typeof targetRegion === 'string' ? targetRegion.trim() : '';
-    const audience = typeof targetAudience === 'string' ? targetAudience.trim() : '';
+    let audience = '';
+    try {
+        audience = normalizeTargetAudience(targetAudience);
+    }
+    catch {
+        throw new Error('audience_invalid');
+    }
+    if (!audience)
+        throw new Error('audience_required');
     if (targetType === 'product') {
         const listingId = typeof targetListingId === 'string' ? targetListingId.trim() : '';
         if (!listingId)
             throw new Error('listing_required');
         if (!REGION_VALUES.has(region))
             throw new Error('region_required');
-        if (!AUDIENCE_VALUES.has(audience))
-            throw new Error('audience_required');
         const check = await pool.query(`SELECT id FROM shop_products
        WHERE shop_id = $1 AND id::text = $2 AND status = 'on'`, [existing.shopId, listingId]);
         if (check.rows.length === 0)
@@ -339,8 +345,6 @@ export async function setPromotionTarget(id, {
     else {
         if (!REGION_VALUES.has(region))
             throw new Error('region_required');
-        if (!AUDIENCE_VALUES.has(audience))
-            throw new Error('audience_required');
         await pool.query(`UPDATE shop_paid_promotions
        SET target_type = 'shop',
            target_listing_id = NULL,

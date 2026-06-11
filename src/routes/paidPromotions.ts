@@ -84,7 +84,7 @@ paidPromotionsRouter.patch('/shops/:shopId/paid-promotion', async (req, res) => 
         const targetType = req.body?.targetType;
         const targetListingId = req.body?.targetListingId;
         const targetRegion = req.body?.targetRegion;
-        const targetAudience = req.body?.targetAudience;
+        const targetAudience = req.body?.targetAudience ?? req.body?.targetAudiences;
         if (!userId) {
             res.status(400).json({ success: false, message: '缺少 userId' });
             return;
@@ -127,6 +127,10 @@ paidPromotionsRouter.patch('/shops/:shopId/paid-promotion', async (req, res) => 
         }
         if (e?.message === 'audience_required') {
             res.status(400).json({ success: false, message: '请选择受众群体' });
+            return;
+        }
+        if (e?.message === 'audience_invalid') {
+            res.status(400).json({ success: false, message: '受众群体选择无效' });
             return;
         }
         if (e?.message === 'listing_not_found') {
