@@ -40,6 +40,7 @@ function rowToPromotion(row) {
         status: row.status,
         targetType: row.target_type ?? null,
         targetListingId: row.target_listing_id ?? null,
+        targetProductId: row.target_product_id ?? null,
         targetProductTitle: row.target_product_title ?? null,
         targetProductImage: row.target_product_image ?? null,
         targetRegion: row.target_region ?? null,
@@ -87,6 +88,7 @@ const PROMOTION_SELECT = `
     s.logo AS shop_logo,
     u.account AS owner_account,
     prod.product_name AS target_product_title,
+    sp.product_id AS target_product_id,
     CASE
       WHEN jsonb_typeof(prod.main_images) = 'array' AND jsonb_array_length(prod.main_images) > 0
       THEN prod.main_images->>0
