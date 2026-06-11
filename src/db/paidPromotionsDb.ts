@@ -1,8 +1,10 @@
 // @ts-nocheck
 import { getPool } from '../db.js';
 import {
+    addDurationToDate,
     buildCampaignScheduleRows,
     getReleasedMetricsFromPlan,
+    parseCampaignDuration,
     PROMOTION_AUDIENCES,
     PROMOTION_REGIONS,
 } from './paidPromotionSchedule.js';
@@ -42,6 +44,10 @@ function rowToPromotion(row) {
         adminNote: row.admin_note ?? null,
         merchantConfirmedAt: row.merchant_confirmed_at ?? null,
         campaignDurationDays: row.campaign_duration_days != null ? Number(row.campaign_duration_days) : null,
+        campaignDurationValue: row.campaign_duration_value != null
+            ? Number(row.campaign_duration_value)
+            : (row.campaign_duration_days != null ? Number(row.campaign_duration_days) : null),
+        campaignDurationUnit: row.campaign_duration_unit ?? (row.campaign_duration_days != null ? 'day' : null),
         budgetTotal: row.budget_total != null ? Math.round(Number(row.budget_total) * 100) / 100 : null,
         presetImpressions: row.preset_impressions != null ? Number(row.preset_impressions) : null,
         presetClicks: row.preset_clicks != null ? Number(row.preset_clicks) : null,
@@ -268,32 +274,37 @@ export async function saveCampaignDraft(id, config) {
         return null;
     if (!canConfigureOrLaunchCampaign(existing))
         throw new Error('promotion_not_awaiting_launch');
-    const durationDays = Math.max(1, Math.min(90, Math.round(Number(config.durationDays ?? 0))));
+    const { value: durationValue, unit: durationUnit } = parseCampaignDuration({
+        durationValue: config.durationValue ?? config.durationDays,
+        durationUnit: config.durationUnit,
+        durationDays: config.durationDays,
+    });
+    const durationDays = durationUnit === 'day' ? durationValue : 1;
     const budgetTotal = Math.max(0, Number(config.budgetTotal ?? 0));
     const impressions = Math.max(0, Math.round(Number(config.impressions ?? 0)));
     const clickRate = Math.max(0, Math.min(100, Number(config.clickRate ?? 0)));
     const clicks = Math.max(0, Math.round(impressions * (clickRate / 100)));
     const visits = Math.max(0, Math.round(Number(config.visits ?? 0)));
-    const orders = Math.max(0, Math.round(Number(config.orders ?? 0)));
-    const revenue = Math.max(0, Number(config.revenue ?? 0));
     const pool = getPool();
     await pool.query(`UPDATE shop_paid_promotions
      SET campaign_duration_days = $1,
-         budget_total = $2,
-         preset_impressions = $3,
-         preset_clicks = $4,
-         preset_visits = $5,
-         preset_orders = $6,
-         preset_revenue = $7,
+         campaign_duration_value = $2,
+         campaign_duration_unit = $3,
+         budget_total = $4,
+         preset_impressions = $5,
+         preset_clicks = $6,
+         preset_visits = $7,
+         preset_orders = 0,
+         preset_revenue = 0,
          updated_at = now()
      WHERE id = $8`, [
         durationDays,
+        durationValue,
+        durationUnit,
         budgetTotal,
         impressions,
         clicks,
         visits,
-        orders,
-        revenue,
         id,
     ]);
     return getPromotionById(id);
@@ -305,22 +316,28 @@ export async function launchCampaign(id) {
         return null;
     if (!canConfigureOrLaunchCampaign(existing))
         throw new Error('promotion_not_awaiting_launch');
-    if (!existing.campaignDurationDays || existing.budgetTotal == null || existing.presetImpressions == null)
+    const duration = parseCampaignDuration({
+        durationValue: existing.campaignDurationValue ?? existing.campaignDurationDays,
+        durationUnit: existing.campaignDurationUnit,
+        durationDays: existing.campaignDurationDays,
+    });
+    if (!duration.value || existing.budgetTotal == null || existing.presetImpressions == null)
         throw new Error('campaign_config_incomplete');
     const startAt = new Date();
-    const endAt = new Date(startAt);
-    endAt.setUTCDate(endAt.getUTCDate() + existing.campaignDurationDays);
+    const endAt = addDurationToDate(startAt, duration.value, duration.unit);
     const scheduleRows = buildCampaignScheduleRows({
         promotionId: existing.id,
+        durationValue: duration.value,
+        durationUnit: duration.unit,
         durationDays: existing.campaignDurationDays,
         startAt,
         presets: {
             impressions: existing.presetImpressions,
             clicks: existing.presetClicks ?? 0,
             visits: existing.presetVisits ?? 0,
-            orders: existing.presetOrders ?? 0,
+            orders: 0,
             spend: existing.budgetTotal,
-            revenue: existing.presetRevenue ?? 0,
+            revenue: 0,
         },
     });
     const pool = getPool();

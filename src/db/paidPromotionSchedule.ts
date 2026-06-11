@@ -47,6 +47,52 @@ function startOfUtcDay(date) {
     return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }
 
+const DURATION_UNITS = new Set(['minute', 'hour', 'day']);
+
+export function parseCampaignDuration({ durationValue, durationUnit, durationDays }) {
+    let unit = typeof durationUnit === 'string' ? durationUnit.trim() : '';
+    if (!DURATION_UNITS.has(unit))
+        unit = 'day';
+    let value = Math.round(Number(durationValue ?? durationDays ?? 0));
+    if (unit === 'minute')
+        value = Math.max(1, Math.min(1440, value));
+    else if (unit === 'hour')
+        value = Math.max(1, Math.min(2160, value));
+    else
+        value = Math.max(1, Math.min(90, value));
+    return { value, unit };
+}
+
+export function addDurationToDate(startAt, value, unit) {
+    const end = new Date(startAt instanceof Date ? startAt : new Date(startAt));
+    if (unit === 'minute')
+        end.setUTCMinutes(end.getUTCMinutes() + value);
+    else if (unit === 'hour')
+        end.setUTCHours(end.getUTCHours() + value);
+    else
+        end.setUTCDate(end.getUTCDate() + value);
+    return end;
+}
+
+export function scheduleBucketCount(value, unit) {
+    if (unit === 'day')
+        return value;
+    if (unit === 'hour')
+        return Math.max(1, Math.min(90, Math.ceil(value / 24)));
+    return 1;
+}
+
+function irregularProgressFactor(progress, seed, completed) {
+    if (completed)
+        return 1;
+    if (progress <= 0)
+        return 0;
+    const rand = mulberry32(seed);
+    const wave = Math.sin(progress * Math.PI * (1.1 + rand() * 0.4)) * 0.06;
+    const jitter = (rand() - 0.5) * 0.04;
+    return Math.min(1, Math.max(0, progress + wave + jitter));
+}
+
 function intradayReleaseFactor(dayDate, now, seed) {
     const dayStart = startOfUtcDay(dayDate).getTime();
     const dayEnd = dayStart + 86400000;
@@ -65,20 +111,23 @@ function intradayReleaseFactor(dayDate, now, seed) {
 export function buildCampaignScheduleRows({
     promotionId,
     durationDays,
+    durationValue,
+    durationUnit,
     startAt,
     presets,
 }) {
-    const days = Math.max(1, Math.min(90, Math.round(Number(durationDays) || 1)));
+    const parsed = parseCampaignDuration({ durationValue, durationUnit, durationDays });
+    const buckets = scheduleBucketCount(parsed.value, parsed.unit);
     const seed = Number(promotionId) * 9973 + 17;
     const start = startAt instanceof Date ? startAt : new Date(startAt);
-    const impressions = distributeIntegerTotal(presets.impressions, days, seed);
-    const clicks = distributeIntegerTotal(presets.clicks, days, seed + 101);
-    const visits = distributeIntegerTotal(presets.visits, days, seed + 203);
-    const orders = distributeIntegerTotal(presets.orders, days, seed + 307);
-    const spend = distributeMoneyTotal(presets.spend, days, seed + 401);
-    const revenue = distributeMoneyTotal(presets.revenue, days, seed + 503);
+    const impressions = distributeIntegerTotal(presets.impressions, buckets, seed);
+    const clicks = distributeIntegerTotal(presets.clicks, buckets, seed + 101);
+    const visits = distributeIntegerTotal(presets.visits, buckets, seed + 203);
+    const orders = distributeIntegerTotal(presets.orders ?? 0, buckets, seed + 307);
+    const spend = distributeMoneyTotal(presets.spend, buckets, seed + 401);
+    const revenue = distributeMoneyTotal(presets.revenue ?? 0, buckets, seed + 503);
     const rows = [];
-    for (let i = 0; i < days; i += 1) {
+    for (let i = 0; i < buckets; i += 1) {
         const day = new Date(start);
         day.setUTCDate(start.getUTCDate() + i);
         rows.push({
@@ -129,11 +178,19 @@ export function getReleasedMetricsFromPlan(planRows, {
         : ts <= start.getTime()
             ? 0
             : Math.min(1, (ts - start.getTime()) / Math.max(1, end.getTime() - start.getTime()));
+    const durationMs = end.getTime() - start.getTime();
+    const useCampaignWindow = durationMs < 86400000;
     const seed = Number(scheduleSeed || 0);
+    const windowFactor = useCampaignWindow
+        ? irregularProgressFactor(campaignProgress, seed, completed)
+        : null;
     const series = planRows.map((row) => {
         const dayDate = new Date(`${row.date}T00:00:00Z`);
         let factor = 0;
-        if (completed) {
+        if (useCampaignWindow) {
+            factor = windowFactor ?? 0;
+        }
+        else if (completed) {
             factor = 1;
         }
         else if (ts >= startOfUtcDay(dayDate).getTime() + 86400000) {

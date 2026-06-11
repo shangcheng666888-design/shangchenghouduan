@@ -97,13 +97,13 @@ adminPaidPromotionsRouter.put('/:id/campaign-config', async (req, res) => {
             return;
         }
         const promotion = await saveCampaignDraft(id, {
+            durationValue: req.body?.durationValue,
+            durationUnit: req.body?.durationUnit,
             durationDays: req.body?.durationDays,
             budgetTotal: req.body?.budgetTotal,
             impressions: req.body?.impressions,
             clickRate: req.body?.clickRate,
             visits: req.body?.visits,
-            orders: req.body?.orders,
-            revenue: req.body?.revenue,
         });
         if (!promotion) {
             res.status(404).json({ success: false, message: '推广记录不存在' });
@@ -130,13 +130,13 @@ adminPaidPromotionsRouter.post('/:id/launch', async (req, res) => {
         }
         if (req.body && Object.keys(req.body).length > 0) {
             await saveCampaignDraft(id, {
+                durationValue: req.body?.durationValue,
+                durationUnit: req.body?.durationUnit,
                 durationDays: req.body?.durationDays,
                 budgetTotal: req.body?.budgetTotal,
                 impressions: req.body?.impressions,
                 clickRate: req.body?.clickRate,
                 visits: req.body?.visits,
-                orders: req.body?.orders,
-                revenue: req.body?.revenue,
             });
         }
         const promotion = await launchCampaign(id);
