@@ -446,4 +446,30 @@ export async function getPromotionMetrics(promotionId) {
     };
 }
 
+export async function listActiveCampaignsWithProgress() {
+    const list = await listPromotions({ status: 'active' });
+    const running = [];
+    for (const promotion of list) {
+        if (!promotion?.campaignStartAt || !promotion?.campaignEndAt)
+            continue;
+        const refreshed = await maybeCompletePromotion(promotion);
+        if (!refreshed || refreshed.status !== 'active')
+            continue;
+        const metrics = await getPromotionMetrics(refreshed.id);
+        const now = Date.now();
+        const end = new Date(refreshed.campaignEndAt).getTime();
+        const start = new Date(refreshed.campaignStartAt).getTime();
+        const remainingMs = Math.max(0, end - now);
+        running.push({
+            promotion: refreshed,
+            metrics,
+            remainingMs,
+            remainingSeconds: Math.ceil(remainingMs / 1000),
+            isSettling: remainingMs <= 0,
+        });
+    }
+    running.sort((a, b) => a.remainingMs - b.remainingMs);
+    return running;
+}
+
 export { PROMOTION_REGIONS, PROMOTION_AUDIENCES };

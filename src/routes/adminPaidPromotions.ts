@@ -6,6 +6,7 @@ import {
     getPromotionById,
     getPromotionMetrics,
     launchCampaign,
+    listActiveCampaignsWithProgress,
     listPromotions,
     saveCampaignDraft,
     updatePromotion,
@@ -54,6 +55,17 @@ adminPaidPromotionsRouter.post('/', async (req, res) => {
             return;
         }
         console.error('[admin paid-promotions create]', e);
+        res.status(500).json({ success: false, message: '服务异常' });
+    }
+});
+
+adminPaidPromotionsRouter.get('/running', async (_req, res) => {
+    try {
+        const list = await listActiveCampaignsWithProgress();
+        res.json({ list });
+    }
+    catch (e) {
+        console.error('[admin paid-promotions running]', e);
         res.status(500).json({ success: false, message: '服务异常' });
     }
 });
