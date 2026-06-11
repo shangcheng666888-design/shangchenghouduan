@@ -8,6 +8,7 @@ import {
     PROMOTION_AUDIENCES,
     PROMOTION_REGIONS,
 } from './paidPromotionSchedule.js';
+import { syncPromotionVisitsToShop } from './shopVisitSync.js';
 
 const CHANNELS = new Set(['tiktok', 'meta', 'google', 'other']);
 const STATUSES = new Set(['pending', 'awaiting_launch', 'active', 'paused', 'ended', 'completed']);
@@ -110,6 +111,7 @@ async function maybeCompletePromotion(promotion) {
     const end = new Date(promotion.campaignEndAt).getTime();
     if (now < end)
         return promotion;
+    await syncPromotionVisitsToShop(promotion);
     const pool = getPool();
     await pool.query(`UPDATE shop_paid_promotions
      SET status = 'completed', updated_at = now()
@@ -117,7 +119,26 @@ async function maybeCompletePromotion(promotion) {
     return getPromotionById(promotion.id);
 }
 
+async function finalizeDueCampaignsForShop(shopId) {
+    const pool = getPool();
+    const dueRes = await pool.query(`SELECT id FROM shop_paid_promotions
+     WHERE shop_id = $1
+       AND status = 'active'
+       AND campaign_end_at IS NOT NULL
+       AND campaign_end_at <= now()`, [shopId]);
+    for (const row of dueRes.rows) {
+        const promotion = await getPromotionById(row.id);
+        if (promotion)
+            await maybeCompletePromotion(promotion);
+    }
+}
+
+function isMerchantVisiblePromotion(promotion) {
+    return Boolean(promotion && MERCHANT_VISIBLE_STATUSES.includes(promotion.status));
+}
+
 export async function getMerchantPromotionByShopId(shopId) {
+    await finalizeDueCampaignsForShop(shopId);
     const pool = getPool();
     const res = await pool.query(`${PROMOTION_SELECT}
      WHERE p.shop_id = $1 AND p.status = ANY($2::text[])
@@ -133,6 +154,8 @@ export async function getMerchantPromotionByShopId(shopId) {
     if (!promotion)
         return null;
     promotion = await maybeCompletePromotion(promotion);
+    if (!isMerchantVisiblePromotion(promotion))
+        return null;
     return promotion;
 }
 
@@ -385,6 +408,8 @@ export async function getPromotionMetrics(promotionId) {
     const promotion = await getPromotionById(promotionId);
     if (!promotion)
         return { series: [], totals: { impressions: 0, clicks: 0, visits: 0, orders: 0, spend: 0, revenue: 0 } };
+    if (promotion.status === 'active')
+        await syncPromotionVisitsToShop(promotion);
     const planRows = await getPlanRows(promotionId);
     if (promotion.status !== 'active' && promotion.status !== 'completed') {
         return {
@@ -470,6 +495,23 @@ export async function listActiveCampaignsWithProgress() {
     }
     running.sort((a, b) => a.remainingMs - b.remainingMs);
     return running;
+}
+
+export async function listPromotionHistoryByShopId(shopId) {
+    await finalizeDueCampaignsForShop(shopId);
+    const pool = getPool();
+    const res = await pool.query(`${PROMOTION_SELECT}
+     WHERE p.shop_id = $1
+       AND p.status IN ('completed', 'ended', 'paused')
+     ORDER BY COALESCE(p.campaign_end_at, p.updated_at) DESC
+     LIMIT 50`, [shopId]);
+    const items = [];
+    for (const row of res.rows) {
+        const promotion = rowToPromotion(row);
+        const metrics = await getPromotionMetrics(promotion.id);
+        items.push({ promotion, metrics });
+    }
+    return items;
 }
 
 export { PROMOTION_REGIONS, PROMOTION_AUDIENCES };

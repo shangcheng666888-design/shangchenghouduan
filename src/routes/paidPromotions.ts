@@ -4,6 +4,7 @@ import { assertShopOwnerByUserId } from '../db/shopFundApplicationsDb.js';
 import {
     getMerchantPromotionByShopId,
     getPromotionMetrics,
+    listPromotionHistoryByShopId,
     setPromotionTarget,
     PROMOTION_AUDIENCES,
     PROMOTION_REGIONS,
@@ -16,6 +17,28 @@ paidPromotionsRouter.get('/paid-promotion/options', (_req, res) => {
         regions: PROMOTION_REGIONS,
         audiences: PROMOTION_AUDIENCES,
     });
+});
+
+paidPromotionsRouter.get('/shops/:shopId/paid-promotion/history', async (req, res) => {
+    try {
+        const shopId = req.params.shopId;
+        const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : '';
+        if (!userId) {
+            res.status(400).json({ success: false, message: '缺少 userId' });
+            return;
+        }
+        const auth = await assertShopOwnerByUserId(shopId, userId);
+        if (!auth.ok) {
+            res.status(403).json({ success: false, message: auth.message ?? '无权限' });
+            return;
+        }
+        const list = await listPromotionHistoryByShopId(shopId);
+        res.json({ list });
+    }
+    catch (e) {
+        console.error('[paid-promotion history GET]', e);
+        res.status(500).json({ success: false, message: '服务异常' });
+    }
 });
 
 paidPromotionsRouter.get('/shops/:shopId/paid-promotion', async (req, res) => {
