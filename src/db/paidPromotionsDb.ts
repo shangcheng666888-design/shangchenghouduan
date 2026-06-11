@@ -14,6 +14,16 @@ const MERCHANT_VISIBLE_STATUSES = ['pending', 'awaiting_launch', 'active'];
 const REGION_VALUES = new Set(PROMOTION_REGIONS.map((item) => item.value));
 const AUDIENCE_VALUES = new Set(PROMOTION_AUDIENCES.map((item) => item.value));
 
+function canConfigureOrLaunchCampaign(promotion) {
+    if (!promotion)
+        return false;
+    if (promotion.status === 'awaiting_launch')
+        return true;
+    if (promotion.status === 'active' && promotion.merchantConfirmedAt && !promotion.campaignStartAt)
+        return true;
+    return false;
+}
+
 function rowToPromotion(row) {
     if (!row)
         return null;
@@ -256,7 +266,7 @@ export async function saveCampaignDraft(id, config) {
     const existing = await getPromotionById(id);
     if (!existing)
         return null;
-    if (existing.status !== 'awaiting_launch')
+    if (!canConfigureOrLaunchCampaign(existing))
         throw new Error('promotion_not_awaiting_launch');
     const durationDays = Math.max(1, Math.min(90, Math.round(Number(config.durationDays ?? 0))));
     const budgetTotal = Math.max(0, Number(config.budgetTotal ?? 0));
@@ -293,7 +303,7 @@ export async function launchCampaign(id) {
     const existing = await getPromotionById(id);
     if (!existing)
         return null;
-    if (existing.status !== 'awaiting_launch')
+    if (!canConfigureOrLaunchCampaign(existing))
         throw new Error('promotion_not_awaiting_launch');
     if (!existing.campaignDurationDays || existing.budgetTotal == null || existing.presetImpressions == null)
         throw new Error('campaign_config_incomplete');
