@@ -21,6 +21,8 @@ import { platformPaymentConfigRouter } from './routes/platformPaymentConfig.js'
 import { adminPlatformPaymentConfigRouter } from './routes/adminPlatformPaymentConfig.js'
 import { homeRouter } from './routes/home.js'
 import { adminHomeFeaturedRouter } from './routes/adminHomeFeatured.js'
+import { paidPromotionsRouter } from './routes/paidPromotions.js'
+import { adminPaidPromotionsRouter } from './routes/adminPaidPromotions.js'
 
 const app = express()
 const PORT = process.env.PORT ?? 3001
@@ -62,6 +64,8 @@ app.use('/api/home', homeRouter)
 app.use('/api/admin/dashboard', adminDashboardRouter)
 app.use('/api/admin/platform-payment-config', adminPlatformPaymentConfigRouter)
 app.use('/api/admin/home-featured', adminHomeFeaturedRouter)
+app.use('/api', paidPromotionsRouter)
+app.use('/api/admin/paid-promotions', adminPaidPromotionsRouter)
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() })
