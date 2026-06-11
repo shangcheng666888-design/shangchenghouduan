@@ -34,6 +34,7 @@ function rowToPromotion(row) {
         id: Number(row.id),
         shopId: row.shop_id,
         shopName: row.shop_name ?? null,
+        shopLogo: row.shop_logo ?? null,
         ownerAccount: row.owner_account ?? null,
         channel: row.channel,
         status: row.status,
@@ -83,6 +84,7 @@ const PROMOTION_SELECT = `
   SELECT
     p.*,
     s.name AS shop_name,
+    s.logo AS shop_logo,
     u.account AS owner_account,
     prod.product_name AS target_product_title,
     CASE
