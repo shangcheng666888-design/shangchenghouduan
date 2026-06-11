@@ -82,6 +82,21 @@ shopProductsRouter.delete('/:shopId/:productId', async (req, res) => {
   try {
     const client = await pool().connect()
     try {
+      const listingRes = await client.query<{ listing_id: string }>(
+        'SELECT id::text AS listing_id FROM shop_products WHERE shop_id = $1 AND product_id = $2',
+        [shopId, productId],
+      )
+      const listingIds = listingRes.rows.map((row) => String(row.listing_id))
+      if (listingIds.length > 0) {
+        try {
+          await client.query(
+            'DELETE FROM shop_recommendations WHERE shop_id = $1 AND listing_id = ANY($2::text[])',
+            [shopId, listingIds],
+          )
+        } catch (recErr) {
+          console.warn('[shop-products DELETE] failed to clear recommendations', recErr)
+        }
+      }
       if (permanent) {
         const r = await client.query(
           'DELETE FROM shop_products WHERE shop_id = $1 AND product_id = $2',
@@ -118,7 +133,7 @@ shopProductsRouter.get('/by-shop/:shopId', async (req, res) => {
         `SELECT sp.id AS listing_id, sp.product_id, sp.status, sp.price AS listing_price, sp.listed_at,
                 p.product_name, p.main_images, p.selling_price AS product_price, p.purchase_price AS supply_price,
                 c.name_en AS category_name, sc.name_en AS sub_category_name,
-                (sr.listing_id IS NOT NULL) AS recommended
+                (sp.status = 'on' AND sr.listing_id IS NOT NULL) AS recommended
          FROM shop_products sp
          JOIN products p ON p.product_id = sp.product_id
          LEFT JOIN categories c ON c.category_id = p.category_id
