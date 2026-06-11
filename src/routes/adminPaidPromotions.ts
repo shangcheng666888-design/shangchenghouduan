@@ -102,7 +102,7 @@ adminPaidPromotionsRouter.put('/:id/campaign-config', async (req, res) => {
             durationDays: req.body?.durationDays,
             budgetTotal: req.body?.budgetTotal,
             impressions: req.body?.impressions,
-            clickRate: req.body?.clickRate,
+            clicks: req.body?.clicks,
             visits: req.body?.visits,
         });
         if (!promotion) {
@@ -114,6 +114,10 @@ adminPaidPromotionsRouter.put('/:id/campaign-config', async (req, res) => {
     catch (e) {
         if (e?.message === 'promotion_not_awaiting_launch') {
             res.status(400).json({ success: false, message: '商家尚未确认推广，暂不可配置' });
+            return;
+        }
+        if (e?.message === 'clicks_exceed_impressions') {
+            res.status(400).json({ success: false, message: '点击量不能大于曝光量' });
             return;
         }
         console.error('[admin paid-promotions campaign-config]', e);
@@ -135,7 +139,7 @@ adminPaidPromotionsRouter.post('/:id/launch', async (req, res) => {
                 durationDays: req.body?.durationDays,
                 budgetTotal: req.body?.budgetTotal,
                 impressions: req.body?.impressions,
-                clickRate: req.body?.clickRate,
+                clicks: req.body?.clicks,
                 visits: req.body?.visits,
             });
         }
@@ -154,6 +158,10 @@ adminPaidPromotionsRouter.post('/:id/launch', async (req, res) => {
         }
         if (e?.message === 'campaign_config_incomplete') {
             res.status(400).json({ success: false, message: '请先完整填写投放配置' });
+            return;
+        }
+        if (e?.message === 'clicks_exceed_impressions') {
+            res.status(400).json({ success: false, message: '点击量不能大于曝光量' });
             return;
         }
         console.error('[admin paid-promotions launch]', e);

@@ -282,8 +282,9 @@ export async function saveCampaignDraft(id, config) {
     const durationDays = durationUnit === 'day' ? durationValue : 1;
     const budgetTotal = Math.max(0, Number(config.budgetTotal ?? 0));
     const impressions = Math.max(0, Math.round(Number(config.impressions ?? 0)));
-    const clickRate = Math.max(0, Math.min(100, Number(config.clickRate ?? 0)));
-    const clicks = Math.max(0, Math.round(impressions * (clickRate / 100)));
+    const clicks = Math.max(0, Math.round(Number(config.clicks ?? 0)));
+    if (impressions > 0 && clicks > impressions)
+        throw new Error('clicks_exceed_impressions');
     const visits = Math.max(0, Math.round(Number(config.visits ?? 0)));
     const pool = getPool();
     await pool.query(`UPDATE shop_paid_promotions
