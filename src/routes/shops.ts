@@ -580,7 +580,8 @@ shopsRouter.get('/:id/dashboard', async (req, res) => {
         const { syncShopPromotionVisits, getShopVisitSummary } = await import('../db/shopVisitSync.js');
         await syncShopPromotionVisits(shopId);
         // 1. 店铺基础信息
-        const shopRes = await pool.query(`SELECT level, credit_score, followers, sales, good_rate, visits
+        const shopRes = await pool.query(`SELECT level, credit_score, followers, sales, good_rate, visits,
+        COALESCE(level_locked, false) AS level_locked, level_sales_baseline
        FROM shops
        WHERE id = $1`, [shopId]);
         if (shopRes.rows.length === 0) {
@@ -593,6 +594,11 @@ shopsRouter.get('/:id/dashboard', async (req, res) => {
         const goodRate = Number(s.good_rate ?? 0);
         const followers = Number(s.followers ?? 0);
         const salesTotal = Number(s.sales ?? 0);
+        const levelLocked = Boolean(s.level_locked);
+        const levelSalesBaseline =
+            s.level_sales_baseline != null && s.level_sales_baseline !== ''
+                ? Number(s.level_sales_baseline)
+                : null;
         const syncedLevel = await syncShopLevelFromSales(pool, shopId);
         if (syncedLevel != null) {
             shopLevel = syncedLevel;
@@ -757,6 +763,8 @@ shopsRouter.get('/:id/dashboard', async (req, res) => {
             unsettledAmount,
             shopLevel,
             shopSalesTotal: salesTotal,
+            levelLocked,
+            levelSalesBaseline,
             creditScore,
             goodRate,
             followers,
@@ -849,10 +857,13 @@ shopsRouter.patch('/:id', async (req, res) => {
             if (!nextLocked) {
                 nextLevel = resolveShopLevelFromSales(nextSales);
             }
+            const nextBaseline = nextLocked ? nextSales : null;
             fields.push(`level = $${i++}`);
             values.push(nextLevel);
             fields.push(`level_locked = $${i++}`);
             values.push(nextLocked);
+            fields.push(`level_sales_baseline = $${i++}`);
+            values.push(nextBaseline);
             fields.push(`sales = $${i++}`);
             values.push(nextSales);
             if (nextLevel !== previousLevel) {

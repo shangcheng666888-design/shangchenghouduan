@@ -12,6 +12,8 @@ export interface ShopRow {
   credit_score: string
   wallet_balance: string
   level: number
+  level_locked?: boolean
+  level_sales_baseline?: string | null
   followers: number
   sales: number
   good_rate: string
@@ -34,6 +36,11 @@ function rowToShop(r: ShopRow) {
     creditScore: Number(r.credit_score),
     walletBalance: Number(r.wallet_balance),
     level: r.level,
+    levelLocked: Boolean(r.level_locked),
+    levelSalesBaseline:
+      r.level_sales_baseline != null && r.level_sales_baseline !== ''
+        ? Number(r.level_sales_baseline)
+        : null,
     followers: r.followers,
     sales: r.sales,
     goodRate: Number(r.good_rate),
@@ -102,7 +109,10 @@ export async function createShop(params: {
 export async function getShopById(id: string): Promise<ReturnType<typeof rowToShop> | null> {
   const pool = getPool()
   const res = await pool.query<ShopRow>(
-    'SELECT id, name, owner_id, status, logo, banner, address, country, credit_score, wallet_balance, level, followers, sales, good_rate, visits, last_login_ip, last_login_country, created_at FROM shops WHERE id = $1',
+    `SELECT id, name, owner_id, status, logo, banner, address, country, credit_score, wallet_balance, level,
+      COALESCE(level_locked, false) AS level_locked, level_sales_baseline,
+      followers, sales, good_rate, visits, last_login_ip, last_login_country, created_at
+     FROM shops WHERE id = $1`,
     [id]
   )
   if (res.rows.length === 0) return null
@@ -112,7 +122,10 @@ export async function getShopById(id: string): Promise<ReturnType<typeof rowToSh
 export async function listShops(opts?: { shopId?: string }): Promise<ReturnType<typeof rowToShop>[]> {
   const pool = getPool()
   let sql =
-    'SELECT id, name, owner_id, status, logo, banner, address, country, credit_score, wallet_balance, level, followers, sales, good_rate, visits, last_login_ip, last_login_country, created_at FROM shops WHERE 1=1'
+    `SELECT id, name, owner_id, status, logo, banner, address, country, credit_score, wallet_balance, level,
+      COALESCE(level_locked, false) AS level_locked, level_sales_baseline,
+      followers, sales, good_rate, visits, last_login_ip, last_login_country, created_at
+     FROM shops WHERE 1=1`
   const params: unknown[] = []
   if (opts?.shopId) {
     params.push(opts.shopId)
