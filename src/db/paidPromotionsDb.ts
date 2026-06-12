@@ -60,6 +60,8 @@ function rowToPromotion(row) {
         presetRevenue: row.preset_revenue != null ? Math.round(Number(row.preset_revenue) * 100) / 100 : null,
         campaignStartAt: row.campaign_start_at ?? null,
         campaignEndAt: row.campaign_end_at ?? null,
+        pausedAt: row.paused_at ?? null,
+        pausedAccumulatedMs: row.paused_accumulated_ms != null ? Number(row.paused_accumulated_ms) : 0,
         scheduleSeed: row.schedule_seed != null ? Number(row.schedule_seed) : null,
         activatedAt: row.activated_at ?? null,
         createdAt: row.created_at,
@@ -111,12 +113,20 @@ async function getPlanRows(promotionId) {
     return res.rows.map(rowToPlanMetric);
 }
 
+function isCampaignEffectivelyComplete(promotion, nowMs = Date.now()) {
+    if (!promotion?.campaignStartAt || !promotion?.campaignEndAt)
+        return false;
+    const start = new Date(promotion.campaignStartAt).getTime();
+    const durationMs = new Date(promotion.campaignEndAt).getTime() - start;
+    const pausedMs = Math.max(0, Number(promotion.pausedAccumulatedMs) || 0);
+    const elapsedMs = Math.max(0, nowMs - start - pausedMs);
+    return elapsedMs >= durationMs;
+}
+
 async function maybeCompletePromotion(promotion) {
     if (!promotion || promotion.status !== 'active' || !promotion.campaignEndAt)
         return promotion;
-    const now = Date.now();
-    const end = new Date(promotion.campaignEndAt).getTime();
-    if (now < end)
+    if (!isCampaignEffectivelyComplete(promotion))
         return promotion;
     await syncPromotionVisitsToShop(promotion);
     const pool = getPool();
@@ -131,11 +141,11 @@ async function finalizeDueCampaignsForShop(shopId) {
     const dueRes = await pool.query(`SELECT id FROM shop_paid_promotions
      WHERE shop_id = $1
        AND status = 'active'
-       AND campaign_end_at IS NOT NULL
-       AND campaign_end_at <= now()`, [shopId]);
+       AND campaign_start_at IS NOT NULL
+       AND campaign_end_at IS NOT NULL`, [shopId]);
     for (const row of dueRes.rows) {
         const promotion = await getPromotionById(row.id);
-        if (promotion)
+        if (promotion && isCampaignEffectivelyComplete(promotion))
             await maybeCompletePromotion(promotion);
     }
 }
@@ -278,10 +288,22 @@ export async function updatePromotion(id, patch) {
     if (patch.status !== undefined) {
         if (!STATUSES.has(patch.status))
             throw new Error('invalid_status');
-        params.push(patch.status);
+        const nextStatus = patch.status;
+        const prevStatus = existing.status;
+        params.push(nextStatus);
         fields.push(`status = $${params.length}`);
-        if (patch.status === 'active' && !existing.activatedAt) {
+        if (nextStatus === 'active' && !existing.activatedAt) {
             fields.push('activated_at = now()');
+        }
+        if (nextStatus === 'paused' && prevStatus === 'active') {
+            fields.push('paused_at = now()');
+        }
+        if (nextStatus === 'active' && prevStatus === 'paused') {
+            fields.push(`paused_accumulated_ms = COALESCE(paused_accumulated_ms, 0) + GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - COALESCE(paused_at, now()))) * 1000))`);
+            fields.push('paused_at = NULL');
+        }
+        if (nextStatus === 'ended' || nextStatus === 'completed') {
+            fields.push('paused_at = NULL');
         }
     }
     if (patch.adminNote !== undefined) {
@@ -524,10 +546,15 @@ export async function getPromotionMetrics(promotionId) {
         };
     }
     if (promotion.status === 'paused') {
+        const freezeAt = promotion.pausedAt
+            ? new Date(promotion.pausedAt)
+            : (promotion.updatedAt ? new Date(promotion.updatedAt) : new Date());
         const released = getReleasedMetricsFromPlan(planRows, {
             campaignStartAt: promotion.campaignStartAt,
             campaignEndAt: promotion.campaignEndAt,
             scheduleSeed: promotion.scheduleSeed ?? promotion.id,
+            now: freezeAt,
+            pausedAccumulatedMs: promotion.pausedAccumulatedMs ?? 0,
         });
         return {
             ...released,
@@ -539,6 +566,7 @@ export async function getPromotionMetrics(promotionId) {
         campaignStartAt: promotion.campaignStartAt,
         campaignEndAt: promotion.campaignEndAt,
         scheduleSeed: promotion.scheduleSeed ?? promotion.id,
+        pausedAccumulatedMs: promotion.pausedAccumulatedMs ?? 0,
     });
     return {
         ...released,
@@ -557,9 +585,11 @@ export async function listActiveCampaignsWithProgress() {
             continue;
         const metrics = await getPromotionMetrics(refreshed.id);
         const now = Date.now();
-        const end = new Date(refreshed.campaignEndAt).getTime();
         const start = new Date(refreshed.campaignStartAt).getTime();
-        const remainingMs = Math.max(0, end - now);
+        const durationMs = new Date(refreshed.campaignEndAt).getTime() - start;
+        const pausedMs = Math.max(0, Number(refreshed.pausedAccumulatedMs) || 0);
+        const elapsedMs = Math.max(0, now - start - pausedMs);
+        const remainingMs = Math.max(0, durationMs - elapsedMs);
         running.push({
             promotion: refreshed,
             metrics,
@@ -577,7 +607,7 @@ export async function listPromotionHistoryByShopId(shopId) {
     const pool = getPool();
     const res = await pool.query(`${PROMOTION_SELECT}
      WHERE p.shop_id = $1
-       AND p.status IN ('completed', 'ended', 'paused')
+       AND p.status IN ('completed', 'ended')
      ORDER BY COALESCE(p.campaign_end_at, p.updated_at) DESC
      LIMIT 50`, [shopId]);
     const items = [];

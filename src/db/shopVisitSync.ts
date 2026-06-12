@@ -53,6 +53,7 @@ export async function syncPromotionVisitsToShop(promotion) {
             campaignStartAt: promotion.campaignStartAt,
             campaignEndAt: promotion.campaignEndAt,
             scheduleSeed: promotion.scheduleSeed ?? promotion.id,
+            pausedAccumulatedMs: promotion.pausedAccumulatedMs ?? 0,
         });
         releasedSeries = released.series;
     }

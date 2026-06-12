@@ -152,6 +152,7 @@ export function getReleasedMetricsFromPlan(planRows, {
     campaignEndAt,
     scheduleSeed,
     now = new Date(),
+    pausedAccumulatedMs = 0,
 }) {
     if (!campaignStartAt || !campaignEndAt || !Array.isArray(planRows) || planRows.length === 0) {
         return {
@@ -172,13 +173,15 @@ export function getReleasedMetricsFromPlan(planRows, {
     const start = new Date(campaignStartAt);
     const end = new Date(campaignEndAt);
     const ts = now.getTime();
-    const completed = ts >= end.getTime();
+    const durationMs = end.getTime() - start.getTime();
+    const pausedMs = Math.max(0, Number(pausedAccumulatedMs) || 0);
+    const elapsedMs = Math.max(0, ts - start.getTime() - pausedMs);
+    const completed = elapsedMs >= durationMs;
     const campaignProgress = completed
         ? 1
         : ts <= start.getTime()
             ? 0
-            : Math.min(1, (ts - start.getTime()) / Math.max(1, end.getTime() - start.getTime()));
-    const durationMs = end.getTime() - start.getTime();
+            : Math.min(1, elapsedMs / Math.max(1, durationMs));
     const useCampaignWindow = durationMs < 86400000;
     const seed = Number(scheduleSeed || 0);
     const windowFactor = useCampaignWindow
