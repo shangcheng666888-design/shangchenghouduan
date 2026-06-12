@@ -4,19 +4,8 @@ import { getPool } from '../db.js';
 import { getShopById } from '../db/shopsDb.js';
 import { assertShopOwnerByUserId, createShopFundApplication, listShopFundApplicationsByShop, } from '../db/shopFundApplicationsDb.js';
 import { deleteStorageObjectIfOurs } from './upload.js';
+import { parseShopLevelInput, resolveShopLevelFromSales, repriceShopProductsForLevel, syncShopLevelFromSales, } from '../db/shopLevel.js';
 export const shopsRouter = Router();
-function getLevelMarginRate(level) {
-    switch (level) {
-        case 2:
-            return 0.15;
-        case 3:
-            return 0.2;
-        case 4:
-            return 0.25;
-        default:
-            return 0.1;
-    }
-}
 shopsRouter.get('/', async (req, res) => {
     try {
         const shopId = req.query.shop;
@@ -114,6 +103,10 @@ shopsRouter.get('/:id', async (req, res) => {
             return;
         }
         const pool = getPool();
+        const syncedLevel = await syncShopLevelFromSales(pool, req.params.id);
+        if (syncedLevel != null) {
+            shop.level = syncedLevel;
+        }
         const countRes = await pool.query('SELECT count(*)::text AS count FROM shop_products WHERE shop_id = $1 AND status = $2', [req.params.id, 'on']);
         const productCount = parseInt(countRes.rows[0]?.count ?? '0', 10);
         res.json({ ...shop, productCount });
@@ -595,11 +588,15 @@ shopsRouter.get('/:id/dashboard', async (req, res) => {
             return;
         }
         const s = shopRes.rows[0];
-        const shopLevel = Number(s.level ?? 1);
+        let shopLevel = Number(s.level ?? 1);
         const creditScore = Number(s.credit_score ?? 0);
         const goodRate = Number(s.good_rate ?? 0);
         const followers = Number(s.followers ?? 0);
         const salesTotal = Number(s.sales ?? 0);
+        const syncedLevel = await syncShopLevelFromSales(pool, shopId);
+        if (syncedLevel != null) {
+            shopLevel = syncedLevel;
+        }
         let visitSummary = {
             visitsTotal: Number(s.visits ?? 0),
             visitsToday: 0,
@@ -822,35 +819,49 @@ shopsRouter.patch('/:id', async (req, res) => {
             fields.push(`banner = $${i++}`);
             values.push(body.banner === null || body.banner === '' ? null : String(body.banner));
         }
-        let newLevel = null;
-        if (body.level !== undefined && body.level !== null) {
-            const lv = body.level;
-            if (typeof lv === 'number' && lv >= 1 && lv <= 4) {
-                newLevel = lv;
+        const touchesLevelPolicy = (body.level !== undefined && body.level !== null) ||
+            typeof body.sales === 'number' ||
+            body.levelAutoUnlock === true;
+        let repriceLevel = null;
+        if (touchesLevelPolicy) {
+            const levelStateRes = await pool.query(`SELECT level, sales, COALESCE(level_locked, false) AS level_locked
+         FROM shops WHERE id = $1`, [id]);
+            if (levelStateRes.rows.length === 0) {
+                res.status(404).json({ success: false, message: '店铺不存在' });
+                return;
             }
-            else {
-                const s = String(lv).trim();
-                if (s === '普通')
-                    newLevel = 1;
-                else if (s === '银牌')
-                    newLevel = 2;
-                else if (s === '金牌')
-                    newLevel = 3;
-                else if (s === '钻石')
-                    newLevel = 4;
+            const levelState = levelStateRes.rows[0];
+            const previousLevel = Number(levelState.level ?? 1);
+            let nextLevel = previousLevel;
+            let nextLocked = Boolean(levelState.level_locked);
+            let nextSales = Number(levelState.sales ?? 0);
+            const manualLevel = parseShopLevelInput(body.level);
+            if (manualLevel != null) {
+                nextLevel = manualLevel;
+                nextLocked = manualLevel !== resolveShopLevelFromSales(nextSales);
             }
-            if (newLevel != null) {
-                fields.push(`level = $${i++}`);
-                values.push(newLevel);
+            if (body.levelAutoUnlock === true) {
+                nextLocked = false;
+            }
+            if (typeof body.sales === 'number') {
+                nextSales = Math.max(0, body.sales);
+            }
+            if (!nextLocked) {
+                nextLevel = resolveShopLevelFromSales(nextSales);
+            }
+            fields.push(`level = $${i++}`);
+            values.push(nextLevel);
+            fields.push(`level_locked = $${i++}`);
+            values.push(nextLocked);
+            fields.push(`sales = $${i++}`);
+            values.push(nextSales);
+            if (nextLevel !== previousLevel) {
+                repriceLevel = nextLevel;
             }
         }
         if (typeof body.followCount === 'number') {
             fields.push(`followers = $${i++}`);
             values.push(Math.max(0, body.followCount));
-        }
-        if (typeof body.sales === 'number') {
-            fields.push(`sales = $${i++}`);
-            values.push(Math.max(0, body.sales));
         }
         if (typeof body.goodRate === 'number') {
             fields.push(`good_rate = $${i++}`);
@@ -883,19 +894,8 @@ shopsRouter.patch('/:id', async (req, res) => {
             res.status(404).json({ success: false, message: '店铺不存在' });
             return;
         }
-        // 兜底重算：即使数据库未部署 trg_shops_level_reprice 触发器，等级变更后也会立即重算在售商品售价
-        if (newLevel != null) {
-            const marginRate = getLevelMarginRate(newLevel);
-            await pool.query(`UPDATE shop_products sp
-         SET price = ROUND(
-           (COALESCE(p.purchase_price::numeric, p.selling_price::numeric, 0) * (1 + $1::numeric))::numeric,
-           2
-         )
-         FROM products p
-         WHERE p.product_id = sp.product_id
-           AND sp.shop_id = $2
-           AND sp.status = 'on'
-           AND COALESCE(p.purchase_price::numeric, p.selling_price::numeric, 0) > 0`, [marginRate, id]);
+        if (repriceLevel != null) {
+            await repriceShopProductsForLevel(pool, id, repriceLevel);
         }
         res.json({ success: true });
     }

@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { getPool } from '../db.js'
 import { getById as getUserById, updateUser, insertFundLog } from '../db/usersDb.js'
+import { resolveShopLevelForSales, repriceShopProductsForLevel } from '../db/shopLevel.js'
 
 export const ordersRouter = Router()
 
@@ -334,9 +335,10 @@ ordersRouter.patch('/:id', async (req, res) => {
         const orderAmount = Math.round(Number(o.total_amount ?? 0) * 100) / 100
         const revenueAmount = Math.round(Number(o.revenue_amount ?? o.total_amount ?? 0) * 100) / 100
 
-        // 锁定店铺行：用于回款 + 累计销售额（等级由管理员手动调整，不自动升级）
-        const shopRes = await client.query<{ wallet_balance: string | null; sales: string | null; level: number | null }>(
-          'SELECT wallet_balance, sales, level FROM shops WHERE id = $1 FOR UPDATE',
+        // 锁定店铺行：用于回款 + 累计销售额 + 按销售额自动升级（管理员锁定等级时跳过）
+        const shopRes = await client.query<{ wallet_balance: string | null; sales: string | null; level: number | null; level_locked: boolean }>(
+          `SELECT wallet_balance, sales, level, COALESCE(level_locked, false) AS level_locked
+           FROM shops WHERE id = $1 FOR UPDATE`,
           [o.shop_id],
         )
         if (shopRes.rows.length === 0) {
@@ -347,7 +349,8 @@ ordersRouter.patch('/:id', async (req, res) => {
 
         const currentWallet = Number(shopRes.rows[0].wallet_balance ?? 0)
         const currentSales = Number(shopRes.rows[0].sales ?? 0)
-        const currentLevel = shopRes.rows[0].level ?? 1
+        const currentLevel = Number(shopRes.rows[0].level ?? 1)
+        const levelLocked = Boolean(shopRes.rows[0].level_locked)
 
         // 1) 计算回款后的店铺余额（幂等：已回款则不重复入账）
         let walletAfter = currentWallet
@@ -367,11 +370,15 @@ ordersRouter.patch('/:id', async (req, res) => {
           newSales = Math.round((currentSales + orderAmount) * 100) / 100
         }
 
-        // 3) 更新店铺钱包余额 + 累计销售额（等级保持不变，由管理员手动修改）
+        // 3) 更新店铺钱包余额 + 累计销售额，并按规则同步等级
+        const nextLevel = resolveShopLevelForSales(newSales, levelLocked, currentLevel)
         await client.query(
           'UPDATE shops SET wallet_balance = $1, sales = $2, level = $3 WHERE id = $4',
-          [walletAfter, newSales, currentLevel, o.shop_id],
+          [walletAfter, newSales, nextLevel, o.shop_id],
         )
+        if (nextLevel !== currentLevel) {
+          await repriceShopProductsForLevel(client, o.shop_id, nextLevel)
+        }
 
         // 更新订单状态与时间戳
         await client.query(
