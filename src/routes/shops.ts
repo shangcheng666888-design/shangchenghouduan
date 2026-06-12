@@ -620,29 +620,62 @@ shopsRouter.get('/:id/dashboard', async (req, res) => {
        FROM shop_products
        WHERE shop_id = $1 AND status = 'on'`, [shopId]);
         const productCount = parseInt(prodRes.rows[0]?.count ?? '0', 10);
-        // 3. 订单汇总 & 今日概况
+        // 3. 订单汇总 & 今日概况（买家已付款订单计入销售额；总利润仅含已完全结算订单）
+        const buyerPaidFilter = `status NOT IN ('pending', 'cancelled', 'refunded')`;
         const ordersAggRes = await pool.query(`SELECT
          count(*)::text AS total_orders,
-         COALESCE(SUM(total_amount), 0)::text AS total_amount,
-         COALESCE(SUM(profit_amount), 0)::text AS total_profit
+         COALESCE(SUM(CASE WHEN ${buyerPaidFilter} THEN total_amount ELSE 0 END), 0)::text AS total_amount,
+         COALESCE(SUM(
+           CASE
+             WHEN status = 'completed' AND revenue_paid_at IS NOT NULL THEN profit_amount
+             ELSE 0
+           END
+         ), 0)::text AS total_profit
        FROM orders
        WHERE shop_id = $1`, [shopId]);
         const oa = ordersAggRes.rows[0];
         const orderCount = parseInt(oa?.total_orders ?? '0', 10);
         const totalSales = Math.round(Number(oa?.total_amount ?? 0) * 100) / 100;
         const totalProfit = Math.round(Number(oa?.total_profit ?? 0) * 100) / 100;
-        // 今日订单与销售
+        // 今日订单与销售（今日下单且买家已付款）
         const todayAggRes = await pool.query(`SELECT
          count(*)::text AS today_orders,
-         COALESCE(SUM(total_amount), 0)::text AS today_amount,
-         COALESCE(SUM(profit_amount), 0)::text AS today_profit
+         COALESCE(SUM(total_amount), 0)::text AS today_amount
        FROM orders
        WHERE shop_id = $1
-         AND created_at::date = CURRENT_DATE`, [shopId]);
+         AND created_at::date = CURRENT_DATE
+         AND ${buyerPaidFilter}`, [shopId]);
         const ta = todayAggRes.rows[0];
         const todayOrders = parseInt(ta?.today_orders ?? '0', 10);
         const todaySales = Math.round(Number(ta?.today_amount ?? 0) * 100) / 100;
-        const todayProfit = Math.round(Number(ta?.today_profit ?? 0) * 100) / 100;
+        // 预计利润：尚未完全结算订单的利润总和（已发货用 profit_amount，待发货按订单金额减采购成本估算）
+        const expectedProfitRes = await pool.query(`WITH unsettled AS (
+         SELECT o.id, o.total_amount, o.profit_amount, o.procurement_total
+         FROM orders o
+         WHERE o.shop_id = $1
+           AND o.status NOT IN ('cancelled', 'refunded', 'pending')
+           AND (o.status <> 'completed' OR o.revenue_paid_at IS NULL)
+       ),
+       proc AS (
+         SELECT oi.order_id,
+           COALESCE(SUM(oi.quantity * COALESCE(p.purchase_price, p.selling_price, oi.unit_price, 0)), 0) AS cost
+         FROM order_items oi
+         LEFT JOIN products p ON p.product_id = oi.product_id
+         WHERE oi.order_id IN (SELECT id FROM unsettled)
+         GROUP BY oi.order_id
+       )
+       SELECT COALESCE(SUM(
+         CASE
+           WHEN COALESCE(u.profit_amount, 0) > 0 THEN u.profit_amount
+           ELSE GREATEST(
+             0,
+             COALESCE(u.total_amount, 0) - COALESCE(NULLIF(u.procurement_total, 0), pr.cost, 0)
+           )
+         END
+       ), 0)::text AS expected_profit
+       FROM unsettled u
+       LEFT JOIN proc pr ON pr.order_id = u.id`, [shopId]);
+        const expectedProfit = Math.round(Number(expectedProfitRes.rows[0]?.expected_profit ?? 0) * 100) / 100;
         // 4. 待处理订单：买家已付款，但店铺还未完成发货采购（status = 'paid'）
         const pendingOrdersRes = await pool.query(`SELECT count(*)::text AS count
        FROM orders
@@ -736,7 +769,7 @@ shopsRouter.get('/:id/dashboard', async (req, res) => {
             visits30d: visitSummary.visits30d,
             todayOrders,
             todaySales,
-            todayProfit,
+            expectedProfit,
             orderTrend: {
                 labels: dayLabels,
                 orders: ordersSeries,
