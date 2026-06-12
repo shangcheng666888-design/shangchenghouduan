@@ -224,8 +224,7 @@ export async function listPromotions({ status, shopId, search, limit, offset } =
     return res.rows.map(rowToPromotion);
 }
 
-export async function listPromotionRecordsAdmin({ shopId, search, status, limit = 100, offset = 0 } = {}) {
-    const pool = getPool();
+function buildPromotionRecordsAdminWhere({ shopId, search, status } = {}) {
     const params = [];
     let where = 'WHERE 1=1';
     if (shopId) {
@@ -240,12 +239,27 @@ export async function listPromotionRecordsAdmin({ shopId, search, status, limit 
         params.push(status);
         where += ` AND p.status = $${params.length}`;
     }
-    params.push(Math.min(Math.max(limit, 1), 200));
-    params.push(Math.max(offset, 0));
+    return { where, params };
+}
+
+const PROMOTION_RECORDS_COUNT_FROM = `
+  FROM shop_paid_promotions p
+  LEFT JOIN shops s ON s.id = p.shop_id
+  LEFT JOIN users u ON u.id = s.owner_id
+`;
+
+export async function listPromotionRecordsAdmin({ shopId, search, status, limit = 100, offset = 0 } = {}) {
+    const pool = getPool();
+    const { where, params } = buildPromotionRecordsAdminWhere({ shopId, search, status });
+    const countRes = await pool.query(`SELECT COUNT(*)::int AS total ${PROMOTION_RECORDS_COUNT_FROM} ${where}`, params);
+    const statusRes = await pool.query(`SELECT p.status, COUNT(*)::int AS count ${PROMOTION_RECORDS_COUNT_FROM} ${where} GROUP BY p.status`, params);
+    const listParams = [...params];
+    listParams.push(Math.min(Math.max(limit, 1), 200));
+    listParams.push(Math.max(offset, 0));
     const res = await pool.query(`${PROMOTION_SELECT}
      ${where}
      ORDER BY p.created_at DESC
-     LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
+     LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`, listParams);
     const promotions = res.rows.map(rowToPromotion);
     const items = [];
     for (const promotion of promotions) {
@@ -262,7 +276,14 @@ export async function listPromotionRecordsAdmin({ shopId, search, status, limit 
         }
         items.push({ promotion, metricsSummary });
     }
-    return items;
+    const statusCounts = {};
+    for (const row of statusRes.rows)
+        statusCounts[row.status] = Number(row.count) || 0;
+    return {
+        list: items,
+        total: Number(countRes.rows[0]?.total) || 0,
+        statusCounts,
+    };
 }
 
 export async function createPromotion({ shopId, channel, status = 'pending', adminNote }) {

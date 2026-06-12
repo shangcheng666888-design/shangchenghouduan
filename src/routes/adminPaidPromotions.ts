@@ -36,14 +36,18 @@ adminPaidPromotionsRouter.get('/records', async (req, res) => {
         const search = typeof req.query.search === 'string' ? req.query.search.trim() : undefined;
         const limit = Number(req.query.limit);
         const offset = Number(req.query.offset);
-        const list = await listPromotionRecordsAdmin({
+        const result = await listPromotionRecordsAdmin({
             status: status || undefined,
             shopId: shopId || undefined,
             search: search || undefined,
             limit: Number.isFinite(limit) ? limit : 100,
             offset: Number.isFinite(offset) ? offset : 0,
         });
-        res.json({ list });
+        res.json({
+            list: result.list,
+            total: result.total,
+            statusCounts: result.statusCounts,
+        });
     }
     catch (e) {
         console.error('[admin paid-promotions records]', e);
