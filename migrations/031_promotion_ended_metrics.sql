@@ -1,0 +1,3 @@
+ALTER TABLE shop_paid_promotions
+  ADD COLUMN IF NOT EXISTS ended_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS ended_metrics_at TIMESTAMPTZ;

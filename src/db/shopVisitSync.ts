@@ -26,10 +26,12 @@ export async function recordOrganicShopVisit(shopId) {
     return true;
 }
 
-export async function syncPromotionVisitsToShop(promotion) {
+export async function syncPromotionVisitsToShop(promotion, options = {}) {
+    const freezeAt = options.freezeAt instanceof Date ? options.freezeAt : null;
+    const pausedAccumulatedMs = options.pausedAccumulatedMs ?? promotion?.pausedAccumulatedMs ?? 0;
     if (!promotion?.shopId || !promotion.campaignStartAt)
         return 0;
-    if (!['active', 'completed'].includes(promotion.status))
+    if (!freezeAt && !['active', 'completed'].includes(promotion.status))
         return 0;
     const pool = getPool();
     const planRes = await pool.query(`SELECT id, metric_date, planned_visits, visits_synced
@@ -45,7 +47,7 @@ export async function syncPromotionVisitsToShop(promotion) {
         visitsSynced: Number(row.visits_synced ?? 0),
     }));
     let releasedSeries;
-    if (promotion.status === 'completed') {
+    if (!freezeAt && promotion.status === 'completed') {
         releasedSeries = planRows.map((row) => ({ date: row.date, visits: row.visits }));
     }
     else {
@@ -53,7 +55,8 @@ export async function syncPromotionVisitsToShop(promotion) {
             campaignStartAt: promotion.campaignStartAt,
             campaignEndAt: promotion.campaignEndAt,
             scheduleSeed: promotion.scheduleSeed ?? promotion.id,
-            pausedAccumulatedMs: promotion.pausedAccumulatedMs ?? 0,
+            now: freezeAt ?? new Date(),
+            pausedAccumulatedMs,
         });
         releasedSeries = released.series;
     }

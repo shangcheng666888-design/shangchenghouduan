@@ -62,6 +62,8 @@ function rowToPromotion(row) {
         campaignEndAt: row.campaign_end_at ?? null,
         pausedAt: row.paused_at ?? null,
         pausedAccumulatedMs: row.paused_accumulated_ms != null ? Number(row.paused_accumulated_ms) : 0,
+        endedAt: row.ended_at ?? null,
+        endedMetricsAt: row.ended_metrics_at ?? null,
         scheduleSeed: row.schedule_seed != null ? Number(row.schedule_seed) : null,
         activatedAt: row.activated_at ?? null,
         createdAt: row.created_at,
@@ -274,12 +276,19 @@ export async function createPromotion({ shopId, channel, status = 'pending', adm
     return getPromotionById(res.rows[0].id);
 }
 
+function resolveForcedEndMetricsFreezeAt(promotion) {
+    if (promotion?.status === 'paused' && promotion.pausedAt)
+        return new Date(promotion.pausedAt);
+    return new Date();
+}
+
 export async function updatePromotion(id, patch) {
     const existing = await getPromotionById(id);
     if (!existing)
         return null;
     const fields = [];
     const params = [];
+    let forcedEndMetricsFreezeAt = null;
     if (patch.channel !== undefined) {
         if (!CHANNELS.has(patch.channel))
             throw new Error('invalid_channel');
@@ -303,7 +312,25 @@ export async function updatePromotion(id, patch) {
             fields.push(`paused_accumulated_ms = COALESCE(paused_accumulated_ms, 0) + GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - COALESCE(paused_at, now()))) * 1000))`);
             fields.push('paused_at = NULL');
         }
-        if (nextStatus === 'ended' || nextStatus === 'completed') {
+        if (nextStatus === 'ended') {
+            if (['active', 'paused'].includes(prevStatus) && existing.campaignStartAt) {
+                forcedEndMetricsFreezeAt = resolveForcedEndMetricsFreezeAt(existing);
+                await syncPromotionVisitsToShop(existing, {
+                    freezeAt: forcedEndMetricsFreezeAt,
+                    pausedAccumulatedMs: existing.pausedAccumulatedMs ?? 0,
+                });
+            }
+            fields.push('ended_at = now()');
+            if (forcedEndMetricsFreezeAt) {
+                params.push(forcedEndMetricsFreezeAt.toISOString());
+                fields.push(`ended_metrics_at = $${params.length}::timestamptz`);
+            }
+            else {
+                fields.push('ended_metrics_at = now()');
+            }
+            fields.push('paused_at = NULL');
+        }
+        if (nextStatus === 'completed') {
             fields.push('paused_at = NULL');
         }
     }
@@ -521,7 +548,27 @@ export async function getPromotionMetrics(promotionId) {
             isCompleted: promotion.status === 'completed',
         };
     }
-    if (promotion.status === 'completed' || promotion.status === 'ended') {
+    if (promotion.status === 'ended') {
+        const freezeAt = promotion.endedMetricsAt
+            ? new Date(promotion.endedMetricsAt)
+            : (promotion.endedAt
+                ? new Date(promotion.endedAt)
+                : (promotion.updatedAt ? new Date(promotion.updatedAt) : new Date()));
+        const released = getReleasedMetricsFromPlan(planRows, {
+            campaignStartAt: promotion.campaignStartAt,
+            campaignEndAt: promotion.campaignEndAt,
+            scheduleSeed: promotion.scheduleSeed ?? promotion.id,
+            now: freezeAt,
+            pausedAccumulatedMs: promotion.pausedAccumulatedMs ?? 0,
+        });
+        return {
+            ...released,
+            presets,
+            isCompleted: true,
+            isForceEnded: true,
+        };
+    }
+    if (promotion.status === 'completed') {
         const totals = planRows.reduce((acc, row) => ({
             impressions: acc.impressions + row.impressions,
             clicks: acc.clicks + row.clicks,
