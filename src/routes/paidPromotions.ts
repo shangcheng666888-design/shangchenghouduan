@@ -59,7 +59,7 @@ paidPromotionsRouter.get('/shops/:shopId/paid-promotion', async (req, res) => {
             res.json({ active: false, promotion: null, metrics: null });
             return;
         }
-        const metrics = ['active', 'completed'].includes(promotion.status)
+        const metrics = ['active', 'paused', 'completed'].includes(promotion.status)
             ? await getPromotionMetrics(promotion.id)
             : null;
         res.json({

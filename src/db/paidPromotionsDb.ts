@@ -14,7 +14,7 @@ import { syncPromotionVisitsToShop } from './shopVisitSync.js';
 const CHANNELS = new Set(['tiktok', 'meta', 'google', 'other']);
 const STATUSES = new Set(['pending', 'awaiting_launch', 'active', 'paused', 'ended', 'completed']);
 const TARGET_TYPES = new Set(['shop', 'product']);
-const MERCHANT_VISIBLE_STATUSES = ['pending', 'awaiting_launch', 'active'];
+const MERCHANT_VISIBLE_STATUSES = ['pending', 'awaiting_launch', 'active', 'paused'];
 const REGION_VALUES = new Set(PROMOTION_REGIONS.map((item) => item.value));
 
 function canConfigureOrLaunchCampaign(promotion) {
@@ -162,8 +162,9 @@ export async function getMerchantPromotionByShopId(shopId) {
      ORDER BY
        CASE p.status
          WHEN 'active' THEN 0
-         WHEN 'awaiting_launch' THEN 1
-         ELSE 2
+         WHEN 'paused' THEN 1
+         WHEN 'awaiting_launch' THEN 2
+         ELSE 3
        END,
        p.updated_at DESC
      LIMIT 1`, [shopId, MERCHANT_VISIBLE_STATUSES]);
