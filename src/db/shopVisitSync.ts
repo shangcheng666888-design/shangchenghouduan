@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { getPool } from '../db.js';
 import { getReleasedMetricsFromPlan } from './paidPromotionSchedule.js';
+import { getMerchantLocalDaySeries, resolveMerchantTimezone } from '../utils/merchantTimezone.js';
 
 async function getPromotionById(id) {
     const { getPromotionById: loadPromotion } = await import('./paidPromotionsDb.js');
@@ -120,45 +121,35 @@ export async function syncAllActivePromotionVisits() {
     }
 }
 
-export async function getShopVisitSummary(shopId) {
+export async function getShopVisitSummary(shopId, timezone = 'UTC') {
+    const tz = resolveMerchantTimezone(timezone);
     const pool = getPool();
+    const daySeries = await getMerchantLocalDaySeries(pool, tz, 7);
     const [totalRes, todayRes, weekRes, monthRes, trendRes] = await Promise.all([
         pool.query('SELECT COALESCE(visits, 0)::text AS visits FROM shops WHERE id = $1', [shopId]),
         pool.query(`SELECT COALESCE(SUM(organic_visits + promotion_visits + COALESCE(simulated_visits, 0)), 0)::text AS visits
        FROM shop_daily_visits
-       WHERE shop_id = $1 AND visit_date = CURRENT_DATE`, [shopId]),
+       WHERE shop_id = $1 AND visit_date = (NOW() AT TIME ZONE $2)::date`, [shopId, tz]),
         pool.query(`SELECT COALESCE(SUM(organic_visits + promotion_visits + COALESCE(simulated_visits, 0)), 0)::text AS visits
        FROM shop_daily_visits
-       WHERE shop_id = $1 AND visit_date >= CURRENT_DATE - INTERVAL '6 days'`, [shopId]),
+       WHERE shop_id = $1 AND visit_date >= (NOW() AT TIME ZONE $2)::date - INTERVAL '6 days'`, [shopId, tz]),
         pool.query(`SELECT COALESCE(SUM(organic_visits + promotion_visits + COALESCE(simulated_visits, 0)), 0)::text AS visits
        FROM shop_daily_visits
-       WHERE shop_id = $1 AND visit_date >= CURRENT_DATE - INTERVAL '29 days'`, [shopId]),
+       WHERE shop_id = $1 AND visit_date >= (NOW() AT TIME ZONE $2)::date - INTERVAL '29 days'`, [shopId, tz]),
         pool.query(`SELECT to_char(visit_date, 'YYYY-MM-DD') AS day,
               COALESCE(SUM(organic_visits + promotion_visits + COALESCE(simulated_visits, 0)), 0)::text AS visits
        FROM shop_daily_visits
        WHERE shop_id = $1
-         AND visit_date >= CURRENT_DATE - INTERVAL '6 days'
+         AND visit_date >= (NOW() AT TIME ZONE $2)::date - INTERVAL '6 days'
        GROUP BY visit_date
-       ORDER BY visit_date`, [shopId]),
+       ORDER BY visit_date`, [shopId, tz]),
     ]);
     const trendMap = new Map();
     for (const row of trendRes.rows) {
         trendMap.set(row.day, parseInt(row.visits ?? '0', 10) || 0);
     }
-    const today = new Date();
-    const dayLabels = [];
-    const daily = [];
-    const weekdayMap = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-    for (let i = 6; i >= 0; i -= 1) {
-        const d = new Date(today);
-        d.setDate(today.getDate() - i);
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        const key = `${y}-${m}-${day}`;
-        dayLabels.push(weekdayMap[d.getDay()]);
-        daily.push(trendMap.get(key) ?? 0);
-    }
+    const dayLabels = daySeries.map((d) => d.labelZh);
+    const daily = daySeries.map((d) => trendMap.get(d.key) ?? 0);
     return {
         visitsTotal: parseInt(totalRes.rows[0]?.visits ?? '0', 10) || 0,
         visitsToday: parseInt(todayRes.rows[0]?.visits ?? '0', 10) || 0,

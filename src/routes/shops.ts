@@ -7,6 +7,7 @@ import { assertShopOwnerForWrite } from '../db/shopAccess.js';
 import { bumpShopDataVersion, getShopSyncSnapshot } from '../db/shopSync.js';
 import { deleteStorageObjectIfOurs } from './upload.js';
 import { parseShopLevelInput, resolveShopLevelFromSales, repriceShopProductsForLevel, syncShopLevelFromSales, } from '../db/shopLevel.js';
+import { getMerchantLocalDaySeries, resolveMerchantTimezone } from '../utils/merchantTimezone.js';
 export const shopsRouter = Router();
 shopsRouter.get('/', async (req, res) => {
     try {
@@ -612,7 +613,9 @@ shopsRouter.get('/:id/finance', async (req, res) => {
 shopsRouter.get('/:id/dashboard', async (req, res) => {
     try {
         const shopId = req.params.id;
+        const merchantTz = resolveMerchantTimezone(req.query.tz);
         const pool = getPool();
+        const daySeries = await getMerchantLocalDaySeries(pool, merchantTz, 7);
         const { syncShopPromotionVisits, getShopVisitSummary } = await import('../db/shopVisitSync.js');
         await syncShopPromotionVisits(shopId);
         // 1. 店铺基础信息
@@ -647,7 +650,7 @@ shopsRouter.get('/:id/dashboard', async (req, res) => {
             visitTrend: { labels: [], daily: [] },
         };
         try {
-            visitSummary = await getShopVisitSummary(shopId);
+            visitSummary = await getShopVisitSummary(shopId, merchantTz);
         }
         catch (visitSummaryErr) {
             console.warn('[shops dashboard] visit summary unavailable', visitSummaryErr);
@@ -682,8 +685,8 @@ shopsRouter.get('/:id/dashboard', async (req, res) => {
          COALESCE(SUM(total_amount), 0)::text AS today_amount
        FROM orders
        WHERE shop_id = $1
-         AND created_at::date = CURRENT_DATE
-         AND ${buyerPaidFilter}`, [shopId]);
+         AND (created_at AT TIME ZONE $2)::date = (NOW() AT TIME ZONE $2)::date
+         AND ${buyerPaidFilter}`, [shopId, merchantTz]);
         const ta = todayAggRes.rows[0];
         const todayOrders = parseInt(ta?.today_orders ?? '0', 10);
         const todaySales = Math.round(Number(ta?.today_amount ?? 0) * 100) / 100;
@@ -729,14 +732,14 @@ shopsRouter.get('/:id/dashboard', async (req, res) => {
          AND (status <> 'completed' OR revenue_paid_at IS NULL)`, [shopId]);
         const unsettledAmount = Math.round(Number(unsettledRes.rows[0]?.amount ?? 0) * 100) / 100;
         // 6. 近 7 日订单趋势（按日期聚合）
-        const trendRes = await pool.query(`SELECT to_char(created_at::date, 'YYYY-MM-DD') AS day,
+        const trendRes = await pool.query(`SELECT to_char((created_at AT TIME ZONE $2)::date, 'YYYY-MM-DD') AS day,
               count(*)::text AS order_count,
               COALESCE(SUM(total_amount), 0)::text AS sales_amount
        FROM orders
        WHERE shop_id = $1
-         AND created_at::date >= CURRENT_DATE - INTERVAL '6 days'
-       GROUP BY created_at::date
-       ORDER BY day`, [shopId]);
+         AND (created_at AT TIME ZONE $2)::date >= (NOW() AT TIME ZONE $2)::date - INTERVAL '6 days'
+       GROUP BY (created_at AT TIME ZONE $2)::date
+       ORDER BY day`, [shopId, merchantTz]);
         const trendMap = new Map();
         for (const row of trendRes.rows) {
             const cnt = parseInt(row.order_count ?? '0', 10);
@@ -746,20 +749,12 @@ shopsRouter.get('/:id/dashboard', async (req, res) => {
                 sales: Number.isFinite(sales) ? sales : 0,
             });
         }
-        const today = new Date();
         const dayLabels = [];
         const ordersSeries = [];
         const salesSeries = [];
-        const weekdayMap = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-        for (let i = 6; i >= 0; i -= 1) {
-            const d = new Date(today);
-            d.setDate(today.getDate() - i);
-            const y = d.getFullYear();
-            const m = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            const key = `${y}-${m}-${day}`;
-            const point = trendMap.get(key) ?? { orders: 0, sales: 0 };
-            dayLabels.push(weekdayMap[d.getDay()]);
+        for (const day of daySeries) {
+            const point = trendMap.get(day.key) ?? { orders: 0, sales: 0 };
+            dayLabels.push(day.labelZh);
             ordersSeries.push(point.orders);
             salesSeries.push(point.sales);
         }
@@ -767,21 +762,21 @@ shopsRouter.get('/:id/dashboard', async (req, res) => {
         try {
             const followerTrendRes = await pool.query(`SELECT day, SUM(follower_count)::text AS follower_count
        FROM (
-         SELECT to_char(created_at::date, 'YYYY-MM-DD') AS day,
+         SELECT to_char((created_at AT TIME ZONE $2)::date, 'YYYY-MM-DD') AS day,
                 count(*)::integer AS follower_count
          FROM user_followed_shops
          WHERE shop_id = $1
-           AND created_at::date >= CURRENT_DATE - INTERVAL '6 days'
-         GROUP BY created_at::date
+           AND (created_at AT TIME ZONE $2)::date >= (NOW() AT TIME ZONE $2)::date - INTERVAL '6 days'
+         GROUP BY (created_at AT TIME ZONE $2)::date
          UNION ALL
          SELECT to_char(follow_date, 'YYYY-MM-DD') AS day,
                 follower_count::integer AS follower_count
          FROM shop_daily_simulated_followers
          WHERE shop_id = $1
-           AND follow_date >= CURRENT_DATE - INTERVAL '6 days'
+           AND follow_date >= (NOW() AT TIME ZONE $2)::date - INTERVAL '6 days'
        ) combined
        GROUP BY day
-       ORDER BY day`, [shopId]);
+       ORDER BY day`, [shopId, merchantTz]);
             for (const row of followerTrendRes.rows) {
                 const cnt = parseInt(row.follower_count ?? '0', 10);
                 followerTrendMap.set(row.day, Number.isFinite(cnt) ? cnt : 0);
@@ -790,16 +785,7 @@ shopsRouter.get('/:id/dashboard', async (req, res) => {
         catch (followerTrendErr) {
             console.warn('[shops dashboard] follower trend unavailable', followerTrendErr);
         }
-        const followersDailySeries = [];
-        for (let i = 6; i >= 0; i -= 1) {
-            const d = new Date(today);
-            d.setDate(today.getDate() - i);
-            const y = d.getFullYear();
-            const m = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            const key = `${y}-${m}-${day}`;
-            followersDailySeries.push(followerTrendMap.get(key) ?? 0);
-        }
+        const followersDailySeries = daySeries.map((day) => followerTrendMap.get(day.key) ?? 0);
         res.json({
             productCount,
             totalSales,
