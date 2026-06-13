@@ -3,6 +3,7 @@ import { getPool } from '../db.js'
 import { getById as getUserById, updateUser, insertFundLog } from '../db/usersDb.js'
 import { resolveShopLevelForSales, repriceShopProductsForLevel } from '../db/shopLevel.js'
 import { assertShopActive } from '../db/shopAccess.js'
+import { bumpShopDataVersion } from '../db/shopSync.js'
 
 export const ordersRouter = Router()
 
@@ -392,6 +393,7 @@ ordersRouter.patch('/:id', async (req, res) => {
         )
 
         await client.query('COMMIT')
+        await bumpShopDataVersion(o.shop_id, ['orders', 'dashboard', 'wallet', 'shop'])
         res.json({ success: true })
         return
       } catch (e) {
@@ -628,6 +630,7 @@ ordersRouter.post('/:id/merchant-ship', async (req, res) => {
         ],
       )
       await client.query('COMMIT')
+      await bumpShopDataVersion(order.shop_id, ['orders', 'dashboard'])
       res.json({ success: true, status: 'shipped', settleAmount: 0, walletBalance: null })
       return
     }
@@ -689,6 +692,8 @@ ordersRouter.post('/:id/merchant-ship', async (req, res) => {
     )
 
     await client.query('COMMIT')
+
+    await bumpShopDataVersion(order.shop_id, ['orders', 'dashboard', 'wallet', 'shop'])
 
     res.json({ success: true, status: 'shipped', settleAmount: totalCost, walletBalance: after })
   } catch (e) {

@@ -1,6 +1,7 @@
 import { getPool } from '../db.js'
 import { getById as getUserById } from './usersDb.js'
 import { getShopById } from './shopsDb.js'
+import { bumpShopDataVersion } from './shopSync.js'
 
 export type ShopFundApplicationType = 'recharge' | 'withdraw'
 export type ShopFundApplicationStatus = 'pending' | 'approved' | 'rejected'
@@ -308,6 +309,7 @@ export async function approveShopFundApplication(
      WHERE id = $3`,
     [now, opts?.reviewerId ?? null, applicationId]
   )
+  await bumpShopDataVersion(app.shopId, ['wallet', 'finance', 'shop', 'dashboard'])
   return { success: true }
 }
 
@@ -316,12 +318,13 @@ export async function rejectShopFundApplication(
   opts?: { remark?: string; reviewerId?: string }
 ): Promise<{ success: boolean; message?: string }> {
   const pool = getPool()
-  const res = await pool.query<{ status: string }>(
-    'SELECT status FROM shop_fund_applications WHERE id = $1',
+  const res = await pool.query<{ status: string; shop_id: string }>(
+    'SELECT status, shop_id FROM shop_fund_applications WHERE id = $1',
     [applicationId]
   )
   if (res.rows.length === 0) return { success: false, message: '申请不存在' }
   const status = normalizeStatus(res.rows[0].status)
+  const shopId = res.rows[0].shop_id
   if (status !== 'pending') return { success: false, message: '申请已处理' }
 
   const now = new Date().toISOString()
@@ -331,6 +334,7 @@ export async function rejectShopFundApplication(
      WHERE id = $4`,
     [now, opts?.reviewerId ?? null, opts?.remark ?? null, applicationId]
   )
+  await bumpShopDataVersion(shopId, ['wallet', 'finance'])
   return { success: true }
 }
 

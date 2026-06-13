@@ -4,6 +4,7 @@ import { getPool } from '../db.js';
 import { getShopById } from '../db/shopsDb.js';
 import { assertShopOwnerByUserId, createShopFundApplication, listShopFundApplicationsByShop, } from '../db/shopFundApplicationsDb.js';
 import { assertShopOwnerForWrite } from '../db/shopAccess.js';
+import { bumpShopDataVersion, getShopSyncSnapshot } from '../db/shopSync.js';
 import { deleteStorageObjectIfOurs } from './upload.js';
 import { parseShopLevelInput, resolveShopLevelFromSales, repriceShopProductsForLevel, syncShopLevelFromSales, } from '../db/shopLevel.js';
 export const shopsRouter = Router();
@@ -101,6 +102,30 @@ shopsRouter.get('/', async (req, res) => {
     }
     catch (e) {
         console.error('[shops list]', e);
+        res.status(500).json({ success: false, message: '服务异常' });
+    }
+});
+/** 轻量 sync：供商家端轮询 data_version 与关键字段 */
+shopsRouter.get('/:id/sync', async (req, res) => {
+    try {
+        const shopId = req.params.id;
+        const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : '';
+        if (userId) {
+            const auth = await assertShopOwnerByUserId(shopId, userId);
+            if (!auth.ok) {
+                res.status(403).json({ success: false, message: auth.message ?? '无权限' });
+                return;
+            }
+        }
+        const snapshot = await getShopSyncSnapshot(shopId);
+        if (!snapshot) {
+            res.status(404).json({ success: false, message: '店铺不存在' });
+            return;
+        }
+        res.json(snapshot);
+    }
+    catch (e) {
+        console.error('[shops sync]', e);
         res.status(500).json({ success: false, message: '服务异常' });
     }
 });
@@ -464,6 +489,7 @@ shopsRouter.post('/:id/recharge', async (req, res) => {
             amount,
             rechargeScreenshotUrl,
         });
+        await bumpShopDataVersion(shopId, ['wallet']);
         res.status(201).json({ success: true, id });
     }
     catch (e) {
@@ -523,6 +549,7 @@ shopsRouter.post('/:id/withdraw', async (req, res) => {
             amount,
             withdrawAddress: address,
         });
+        await bumpShopDataVersion(shopId, ['wallet']);
         res.status(201).json({ success: true, id });
     }
     catch (e) {
@@ -943,6 +970,18 @@ shopsRouter.patch('/:id', async (req, res) => {
         }
         if (repriceLevel != null) {
             await repriceShopProductsForLevel(pool, id, repriceLevel);
+        }
+        const merchantWrite = body.logo !== undefined || body.banner !== undefined || body.name !== undefined
+            || body.address !== undefined || body.country !== undefined;
+        if (merchantWrite) {
+            await bumpShopDataVersion(id, ['shop', 'dashboard']);
+        }
+        if (body.status === 'banned' || body.status === 'normal') {
+            await bumpShopDataVersion(id, ['shop', 'all']);
+        }
+        else if (typeof body.walletBalance === 'number' || typeof body.level === 'number'
+            || typeof body.sales === 'number' || typeof body.creditScore === 'number') {
+            await bumpShopDataVersion(id, ['shop', 'dashboard', 'wallet']);
         }
         res.json({ success: true });
     }

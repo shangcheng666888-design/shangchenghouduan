@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { assertShopOwnerByUserId } from '../db/shopFundApplicationsDb.js';
 import { assertShopOwnerForWrite } from '../db/shopAccess.js';
+import { bumpShopDataVersion } from '../db/shopSync.js';
 import {
     getMerchantPromotionByShopId,
     getPromotionMetrics,
@@ -106,6 +107,7 @@ paidPromotionsRouter.patch('/shops/:shopId/paid-promotion', async (req, res) => 
             targetRegion,
             targetAudience,
         });
+        await bumpShopDataVersion(shopId, ['promotion', 'dashboard']);
         res.json({
             success: true,
             promotion: updated,

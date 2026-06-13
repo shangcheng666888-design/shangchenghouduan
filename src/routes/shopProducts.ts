@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { getPool } from '../db.js'
 import { assertShopActive } from '../db/shopAccess.js'
+import { bumpShopDataVersion } from '../db/shopSync.js'
 
 export const shopProductsRouter = Router()
 const pool = process.env.DB_DSN ? () => getPool() : null
@@ -67,6 +68,7 @@ shopProductsRouter.post('/', async (req, res) => {
         [shopId, productId, String(finalPrice)],
       )
       const row = r.rows[0]
+      await bumpShopDataVersion(shopId, ['warehouse', 'dashboard'])
       res.json({ success: true, message: '已上架', listingId: row?.id, price: finalPrice })
     } finally {
       client.release()
@@ -113,12 +115,14 @@ shopProductsRouter.delete('/:shopId/:productId', async (req, res) => {
           'DELETE FROM shop_products WHERE shop_id = $1 AND product_id = $2',
           [shopId, productId]
         )
+        await bumpShopDataVersion(shopId, ['warehouse', 'dashboard'])
         res.json({ success: true, deleted: r.rowCount })
       } else {
         const r = await client.query(
           'UPDATE shop_products SET status = $1 WHERE shop_id = $2 AND product_id = $3',
           ['off', shopId, productId]
         )
+        await bumpShopDataVersion(shopId, ['warehouse', 'dashboard'])
         res.json({ success: true, updated: r.rowCount })
       }
     } finally {
