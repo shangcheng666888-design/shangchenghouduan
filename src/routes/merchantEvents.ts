@@ -5,7 +5,7 @@ import { subscribeMerchantEvents } from '../db/merchantEventHub.js'
 export const merchantEventsRouter = Router()
 
 /** SSE：商家端实时 sync 推送（需 shopId + userId 校验店主身份） */
-merchantEventsRouter.get('/merchant/events', (req, res) => {
+merchantEventsRouter.get('/merchant/events', async (req, res) => {
   const shopId = typeof req.query.shopId === 'string' ? req.query.shopId.trim() : ''
   const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : ''
 
@@ -14,17 +14,14 @@ merchantEventsRouter.get('/merchant/events', (req, res) => {
     return
   }
 
-  void (async () => {
-    const auth = await assertShopOwnerByUserId(shopId, userId)
-    if (!auth.ok) {
-      res.status(403).json({ success: false, message: auth.message ?? '无权限' })
-      return
-    }
+  const auth = await assertShopOwnerByUserId(shopId, userId)
+  if (!auth.ok) {
+    res.status(403).json({ success: false, message: auth.message ?? '无权限' })
+    return
+  }
 
-    const unsubscribe = subscribeMerchantEvents(shopId, res)
-
-    req.on('close', () => {
-      unsubscribe()
-    })
-  })()
+  const unsubscribe = subscribeMerchantEvents(shopId, res)
+  req.on('close', () => {
+    unsubscribe()
+  })
 })

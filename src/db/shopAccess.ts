@@ -22,7 +22,7 @@ export async function assertShopActive(shopId: string): Promise<AuthOk | AuthFai
 export async function assertShopOwnerForWrite(shopId: string, userId: string): Promise<AuthOk | AuthFail> {
   const auth = await assertShopOwnerByUserId(shopId, userId)
   if (!auth.ok) {
-    return auth
+    return { ok: false, message: auth.message ?? '无权限' }
   }
   return assertShopActive(shopId)
 }

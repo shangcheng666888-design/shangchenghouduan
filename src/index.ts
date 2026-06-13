@@ -70,7 +70,7 @@ app.use('/api/admin/paid-promotions', adminPaidPromotionsRouter);
 app.use('/api/geocode', geocodeRouter);
 app.use('/api', merchantEventsRouter);
 app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, ts: new Date().toISOString() });
+    res.json({ ok: true, ts: new Date().toISOString(), sync: true });
 });
 app.listen(PORT, () => {
     console.log(`[backend] http://localhost:${PORT}`);

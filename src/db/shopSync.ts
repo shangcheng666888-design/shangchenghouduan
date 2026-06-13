@@ -53,7 +53,7 @@ export async function getShopSyncSnapshot(shopId: string) {
 
   return {
     version: Number(row.data_version ?? 1),
-    status: row.status ?? 'normal',
+    status: row.status === 'banned' ? 'banned' : 'normal',
     banReason: row.ban_reason ?? null,
     banNotice: row.ban_notice ?? null,
     bannedAt: row.banned_at ?? null,
