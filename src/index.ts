@@ -24,6 +24,7 @@ import { homeRouter } from './routes/home.js';
 import { adminHomeFeaturedRouter } from './routes/adminHomeFeatured.js';
 import { paidPromotionsRouter } from './routes/paidPromotions.js';
 import { adminPaidPromotionsRouter } from './routes/adminPaidPromotions.js';
+import { geocodeRouter } from './routes/geocode.js';
 const app = express();
 const PORT = process.env.PORT ?? 3001;
 app.use(cors({ origin: true, credentials: true }));
@@ -65,6 +66,7 @@ app.use('/api/admin/platform-payment-config', adminPlatformPaymentConfigRouter);
 app.use('/api/admin/home-featured', adminHomeFeaturedRouter);
 app.use('/api', paidPromotionsRouter);
 app.use('/api/admin/paid-promotions', adminPaidPromotionsRouter);
+app.use('/api/geocode', geocodeRouter);
 app.get('/api/health', (_req, res) => {
     res.json({ ok: true, ts: new Date().toISOString() });
 });
