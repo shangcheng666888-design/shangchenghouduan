@@ -765,12 +765,22 @@ shopsRouter.get('/:id/dashboard', async (req, res) => {
         }
         const followerTrendMap = new Map();
         try {
-            const followerTrendRes = await pool.query(`SELECT to_char(created_at::date, 'YYYY-MM-DD') AS day,
-              count(*)::text AS follower_count
-       FROM user_followed_shops
-       WHERE shop_id = $1
-         AND created_at::date >= CURRENT_DATE - INTERVAL '6 days'
-       GROUP BY created_at::date
+            const followerTrendRes = await pool.query(`SELECT day, SUM(follower_count)::text AS follower_count
+       FROM (
+         SELECT to_char(created_at::date, 'YYYY-MM-DD') AS day,
+                count(*)::integer AS follower_count
+         FROM user_followed_shops
+         WHERE shop_id = $1
+           AND created_at::date >= CURRENT_DATE - INTERVAL '6 days'
+         GROUP BY created_at::date
+         UNION ALL
+         SELECT to_char(follow_date, 'YYYY-MM-DD') AS day,
+                follower_count::integer AS follower_count
+         FROM shop_daily_simulated_followers
+         WHERE shop_id = $1
+           AND follow_date >= CURRENT_DATE - INTERVAL '6 days'
+       ) combined
+       GROUP BY day
        ORDER BY day`, [shopId]);
             for (const row of followerTrendRes.rows) {
                 const cnt = parseInt(row.follower_count ?? '0', 10);
@@ -978,6 +988,10 @@ shopsRouter.patch('/:id', async (req, res) => {
         }
         if (body.status === 'banned' || body.status === 'normal') {
             await bumpShopDataVersion(id, ['shop', 'all']);
+        }
+        if (body.status === 'normal') {
+            const { ensureEngagementPlanForShopAfterUnban } = await import('../db/shopEngagementSimulation.js');
+            await ensureEngagementPlanForShopAfterUnban(id);
         }
         else if (typeof body.walletBalance === 'number' || typeof body.level === 'number'
             || typeof body.sales === 'number' || typeof body.creditScore === 'number') {

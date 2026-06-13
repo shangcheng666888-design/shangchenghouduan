@@ -80,4 +80,7 @@ app.listen(PORT, () => {
             .then(({ syncAllActivePromotionVisits }) => syncAllActivePromotionVisits())
             .catch((e) => console.error('[paid-promotion visit sync]', e));
     }, syncIntervalMs);
+    import('./db/shopEngagementSimulation.js')
+        .then(({ startEngagementSimulationWorker }) => startEngagementSimulationWorker())
+        .catch((e) => console.error('[engagement simulation] worker start failed', e));
 });

@@ -124,17 +124,17 @@ export async function getShopVisitSummary(shopId) {
     const pool = getPool();
     const [totalRes, todayRes, weekRes, monthRes, trendRes] = await Promise.all([
         pool.query('SELECT COALESCE(visits, 0)::text AS visits FROM shops WHERE id = $1', [shopId]),
-        pool.query(`SELECT COALESCE(SUM(organic_visits + promotion_visits), 0)::text AS visits
+        pool.query(`SELECT COALESCE(SUM(organic_visits + promotion_visits + COALESCE(simulated_visits, 0)), 0)::text AS visits
        FROM shop_daily_visits
        WHERE shop_id = $1 AND visit_date = CURRENT_DATE`, [shopId]),
-        pool.query(`SELECT COALESCE(SUM(organic_visits + promotion_visits), 0)::text AS visits
+        pool.query(`SELECT COALESCE(SUM(organic_visits + promotion_visits + COALESCE(simulated_visits, 0)), 0)::text AS visits
        FROM shop_daily_visits
        WHERE shop_id = $1 AND visit_date >= CURRENT_DATE - INTERVAL '6 days'`, [shopId]),
-        pool.query(`SELECT COALESCE(SUM(organic_visits + promotion_visits), 0)::text AS visits
+        pool.query(`SELECT COALESCE(SUM(organic_visits + promotion_visits + COALESCE(simulated_visits, 0)), 0)::text AS visits
        FROM shop_daily_visits
        WHERE shop_id = $1 AND visit_date >= CURRENT_DATE - INTERVAL '29 days'`, [shopId]),
         pool.query(`SELECT to_char(visit_date, 'YYYY-MM-DD') AS day,
-              COALESCE(SUM(organic_visits + promotion_visits), 0)::text AS visits
+              COALESCE(SUM(organic_visits + promotion_visits + COALESCE(simulated_visits, 0)), 0)::text AS visits
        FROM shop_daily_visits
        WHERE shop_id = $1
          AND visit_date >= CURRENT_DATE - INTERVAL '6 days'
