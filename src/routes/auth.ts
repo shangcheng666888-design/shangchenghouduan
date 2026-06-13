@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import fetch from 'node-fetch'
 import { getByAccount, getById, nextUserId, createUser } from '../db/usersDb.js'
+import { getShopById } from '../db/shopsDb.js'
 import { getPool } from '../db.js'
 
 export const authRouter = Router()
@@ -90,9 +91,19 @@ authRouter.post('/shop-login', async (req, res) => {
         // 后台记录失败不影响用户登录
       }
     })().catch(() => {})
+    const shop = await getShopById(user.shopId)
+    const shopStatus = shop?.status ?? 'normal'
     res.json({
       success: true,
       user: { id: user.id, account: user.account, balance: user.balance, shopId: user.shopId, isBot: user.isBot ?? false, avatar: user.avatar ?? null },
+      shopStatus,
+      shopBan: shopStatus === 'banned'
+        ? {
+            reason: shop?.banReason ?? null,
+            notice: shop?.banNotice ?? null,
+            bannedAt: shop?.bannedAt ?? null,
+          }
+        : null,
     })
   } catch (e) {
     console.error('[auth shop-login]', e)

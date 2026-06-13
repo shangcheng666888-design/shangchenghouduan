@@ -20,6 +20,10 @@ export interface ShopRow {
   visits: number
   last_login_ip: string | null
   last_login_country: string | null
+  ban_reason?: string | null
+  ban_notice?: string | null
+  banned_at?: string | null
+  banned_by?: string | null
   created_at: string
 }
 
@@ -33,6 +37,10 @@ function rowToShop(r: ShopRow) {
     address: r.address ?? null,
     country: r.country ?? null,
     status: r.status as 'normal' | 'banned',
+    banReason: r.ban_reason ?? null,
+    banNotice: r.ban_notice ?? null,
+    bannedAt: r.banned_at ?? null,
+    bannedBy: r.banned_by ?? null,
     creditScore: Number(r.credit_score),
     walletBalance: Number(r.wallet_balance),
     level: r.level,
@@ -109,7 +117,8 @@ export async function createShop(params: {
 export async function getShopById(id: string): Promise<ReturnType<typeof rowToShop> | null> {
   const pool = getPool()
   const res = await pool.query<ShopRow>(
-    `SELECT id, name, owner_id, status, logo, banner, address, country, credit_score, wallet_balance, level,
+    `SELECT id, name, owner_id, status, ban_reason, ban_notice, banned_at, banned_by,
+      logo, banner, address, country, credit_score, wallet_balance, level,
       COALESCE(level_locked, false) AS level_locked, level_sales_baseline,
       followers, sales, good_rate, visits, last_login_ip, last_login_country, created_at
      FROM shops WHERE id = $1`,
@@ -122,7 +131,8 @@ export async function getShopById(id: string): Promise<ReturnType<typeof rowToSh
 export async function listShops(opts?: { shopId?: string }): Promise<ReturnType<typeof rowToShop>[]> {
   const pool = getPool()
   let sql =
-    `SELECT id, name, owner_id, status, logo, banner, address, country, credit_score, wallet_balance, level,
+    `SELECT id, name, owner_id, status, ban_reason, ban_notice, banned_at, banned_by,
+      logo, banner, address, country, credit_score, wallet_balance, level,
       COALESCE(level_locked, false) AS level_locked, level_sales_baseline,
       followers, sales, good_rate, visits, last_login_ip, last_login_country, created_at
      FROM shops WHERE 1=1`

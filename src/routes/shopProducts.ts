@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { getPool } from '../db.js'
+import { assertShopActive } from '../db/shopAccess.js'
 
 export const shopProductsRouter = Router()
 const pool = process.env.DB_DSN ? () => getPool() : null
@@ -15,6 +16,11 @@ shopProductsRouter.post('/', async (req, res) => {
   }
   if (!pool) {
     res.status(503).json({ success: false, message: '未配置数据库' })
+    return
+  }
+  const banCheck = await assertShopActive(shopId)
+  if (!banCheck.ok) {
+    res.status(403).json({ success: false, message: banCheck.message, code: banCheck.code })
     return
   }
   try {
@@ -77,6 +83,11 @@ shopProductsRouter.delete('/:shopId/:productId', async (req, res) => {
   const permanent = req.query.permanent === '1' || req.query.permanent === 'true'
   if (!pool) {
     res.status(503).json({ success: false, message: '未配置数据库' })
+    return
+  }
+  const banCheck = await assertShopActive(shopId)
+  if (!banCheck.ok) {
+    res.status(403).json({ success: false, message: banCheck.message, code: banCheck.code })
     return
   }
   try {

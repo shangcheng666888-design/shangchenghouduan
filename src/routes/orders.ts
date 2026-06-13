@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { getPool } from '../db.js'
 import { getById as getUserById, updateUser, insertFundLog } from '../db/usersDb.js'
 import { resolveShopLevelForSales, repriceShopProductsForLevel } from '../db/shopLevel.js'
+import { assertShopActive } from '../db/shopAccess.js'
 
 export const ordersRouter = Router()
 
@@ -558,6 +559,13 @@ ordersRouter.post('/:id/merchant-ship', async (req, res) => {
     if (order.status !== 'paid') {
       await client.query('ROLLBACK')
       res.status(400).json({ success: false, message: '当前订单状态不支持发货结算' })
+      return
+    }
+
+    const banCheck = await assertShopActive(order.shop_id)
+    if (!banCheck.ok) {
+      await client.query('ROLLBACK')
+      res.status(403).json({ success: false, message: banCheck.message, code: banCheck.code })
       return
     }
 

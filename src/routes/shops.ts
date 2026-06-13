@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { getPool } from '../db.js';
 import { getShopById } from '../db/shopsDb.js';
 import { assertShopOwnerByUserId, createShopFundApplication, listShopFundApplicationsByShop, } from '../db/shopFundApplicationsDb.js';
+import { assertShopOwnerForWrite } from '../db/shopAccess.js';
 import { deleteStorageObjectIfOurs } from './upload.js';
 import { parseShopLevelInput, resolveShopLevelFromSales, repriceShopProductsForLevel, syncShopLevelFromSales, } from '../db/shopLevel.js';
 export const shopsRouter = Router();
@@ -41,6 +42,10 @@ shopsRouter.get('/', async (req, res) => {
         s.last_login_ip,
         s.last_login_country,
         s.status,
+        s.ban_reason,
+        s.ban_notice,
+        s.banned_at,
+        s.banned_by,
         s.created_at,
         COALESCE(sp.listed_count, 0)  AS listed_count
       FROM shops s
@@ -86,6 +91,10 @@ shopsRouter.get('/', async (req, res) => {
             lastLoginIp: row.last_login_ip ?? null,
             lastLoginCountry: row.last_login_country ?? null,
             status: row.status ?? 'normal',
+            banReason: row.ban_reason ?? null,
+            banNotice: row.ban_notice ?? null,
+            bannedAt: row.banned_at ?? null,
+            bannedBy: row.banned_by ?? null,
             createdAt: row.created_at,
         }));
         res.json({ list });
@@ -234,9 +243,9 @@ shopsRouter.post('/:id/trade-password/set', async (req, res) => {
             res.status(400).json({ success: false, message: '缺少用户信息' });
             return;
         }
-        const auth = await assertShopOwnerByUserId(shopId, userId);
+        const auth = await assertShopOwnerForWrite(shopId, userId);
         if (!auth.ok) {
-            res.status(403).json({ success: false, message: auth.message ?? '无权限' });
+            res.status(403).json({ success: false, message: auth.message ?? '无权限', code: auth.code });
             return;
         }
         const pinRegex = /^\d{6}$/;
@@ -271,9 +280,9 @@ shopsRouter.post('/:id/trade-password/change', async (req, res) => {
             res.status(400).json({ success: false, message: '缺少用户信息' });
             return;
         }
-        const auth = await assertShopOwnerByUserId(shopId, userId);
+        const auth = await assertShopOwnerForWrite(shopId, userId);
         if (!auth.ok) {
-            res.status(403).json({ success: false, message: auth.message ?? '无权限' });
+            res.status(403).json({ success: false, message: auth.message ?? '无权限', code: auth.code });
             return;
         }
         const pinRegex = /^\d{6}$/;
@@ -315,9 +324,9 @@ shopsRouter.post('/:id/recommendations', async (req, res) => {
             res.status(400).json({ success: false, message: '缺少 listingId' });
             return;
         }
-        const auth = await assertShopOwnerByUserId(shopId, userId);
+        const auth = await assertShopOwnerForWrite(shopId, userId);
         if (!auth.ok) {
-            res.status(403).json({ success: false, message: auth.message ?? '无权限' });
+            res.status(403).json({ success: false, message: auth.message ?? '无权限', code: auth.code });
             return;
         }
         const pool = getPool();
@@ -340,9 +349,9 @@ shopsRouter.delete('/:id/recommendations/:listingId', async (req, res) => {
             res.status(400).json({ success: false, message: '缺少用户信息' });
             return;
         }
-        const auth = await assertShopOwnerByUserId(shopId, userId);
+        const auth = await assertShopOwnerForWrite(shopId, userId);
         if (!auth.ok) {
-            res.status(403).json({ success: false, message: auth.message ?? '无权限' });
+            res.status(403).json({ success: false, message: auth.message ?? '无权限', code: auth.code });
             return;
         }
         const pool = getPool();
@@ -425,9 +434,9 @@ shopsRouter.post('/:id/recharge', async (req, res) => {
             res.status(400).json({ success: false, message: '缺少用户信息' });
             return;
         }
-        const auth = await assertShopOwnerByUserId(shopId, userId);
+        const auth = await assertShopOwnerForWrite(shopId, userId);
         if (!auth.ok) {
-            res.status(403).json({ success: false, message: auth.message ?? '无权限' });
+            res.status(403).json({ success: false, message: auth.message ?? '无权限', code: auth.code });
             return;
         }
         if (!Number.isFinite(amount) || amount <= 0) {
@@ -475,9 +484,9 @@ shopsRouter.post('/:id/withdraw', async (req, res) => {
             res.status(400).json({ success: false, message: '缺少用户信息' });
             return;
         }
-        const auth = await assertShopOwnerByUserId(shopId, userId);
+        const auth = await assertShopOwnerForWrite(shopId, userId);
         if (!auth.ok) {
-            res.status(403).json({ success: false, message: auth.message ?? '无权限' });
+            res.status(403).json({ success: false, message: auth.message ?? '无权限', code: auth.code });
             return;
         }
         if (!Number.isFinite(amount) || amount <= 0) {
@@ -806,9 +815,9 @@ shopsRouter.patch('/:id', async (req, res) => {
                 res.status(400).json({ success: false, message: '修改店铺头像或横幅需提供 userId' });
                 return;
             }
-            const auth = await assertShopOwnerByUserId(id, userId);
+            const auth = await assertShopOwnerForWrite(id, userId);
             if (!auth.ok) {
-                res.status(403).json({ success: false, message: auth.message ?? '无权限' });
+                res.status(403).json({ success: false, message: auth.message ?? '无权限', code: auth.code });
                 return;
             }
             const existing = await getShopById(id);
@@ -890,9 +899,36 @@ shopsRouter.patch('/:id', async (req, res) => {
             fields.push(`visits = $${i++}`);
             values.push(Math.max(0, Math.floor(body.visits)));
         }
-        if (body.status === 'normal' || body.status === 'banned') {
+        if (body.status === 'banned') {
+            const banReason = typeof body.banReason === 'string' ? body.banReason.trim() : '';
+            if (!banReason) {
+                res.status(400).json({ success: false, message: '封禁时必须填写原因' });
+                return;
+            }
+            const banNotice = typeof body.banNotice === 'string' ? body.banNotice.trim() : '';
+            const bannedBy = typeof body.bannedBy === 'string' ? body.bannedBy.trim() : null;
             fields.push(`status = $${i++}`);
-            values.push(body.status);
+            values.push('banned');
+            fields.push(`ban_reason = $${i++}`);
+            values.push(banReason);
+            fields.push(`ban_notice = $${i++}`);
+            values.push(banNotice || null);
+            fields.push(`banned_at = $${i++}`);
+            values.push(new Date());
+            fields.push(`banned_by = $${i++}`);
+            values.push(bannedBy);
+        }
+        else if (body.status === 'normal') {
+            fields.push(`status = $${i++}`);
+            values.push('normal');
+            fields.push(`ban_reason = $${i++}`);
+            values.push(null);
+            fields.push(`ban_notice = $${i++}`);
+            values.push(null);
+            fields.push(`banned_at = $${i++}`);
+            values.push(null);
+            fields.push(`banned_by = $${i++}`);
+            values.push(null);
         }
         if (fields.length === 0) {
             res.json({ success: true });

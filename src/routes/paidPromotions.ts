@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { Router } from 'express';
 import { assertShopOwnerByUserId } from '../db/shopFundApplicationsDb.js';
+import { assertShopOwnerForWrite } from '../db/shopAccess.js';
 import {
     getMerchantPromotionByShopId,
     getPromotionMetrics,
@@ -89,9 +90,9 @@ paidPromotionsRouter.patch('/shops/:shopId/paid-promotion', async (req, res) => 
             res.status(400).json({ success: false, message: '缺少 userId' });
             return;
         }
-        const auth = await assertShopOwnerByUserId(shopId, userId);
+        const auth = await assertShopOwnerForWrite(shopId, userId);
         if (!auth.ok) {
-            res.status(403).json({ success: false, message: auth.message ?? '无权限' });
+            res.status(403).json({ success: false, message: auth.message ?? '无权限', code: auth.code });
             return;
         }
         const promotion = await getMerchantPromotionByShopId(shopId);
